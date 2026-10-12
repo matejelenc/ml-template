@@ -34,8 +34,13 @@ def _get_run_id() -> str:
 
 
 def _experiment_id() -> str:
-    """Name of the chosen experiment file, e.g. "001-toy", or "scratch" if none was chosen."""
-    return HydraConfig.get().runtime.choices.get("experiment") or SCRATCH
+    """Name of the chosen experiment file, e.g. "001-toy", or "scratch" if none was chosen.
+
+    An experiment file in a subfolder, chosen with +experiment=vision/012-lora, has the
+    ID "012-lora".
+    """
+    choice = HydraConfig.get().runtime.choices.get("experiment")
+    return str(choice).split("/")[-1] if choice else SCRATCH
 
 
 def _env(name: str, default: Any = None) -> Any:

@@ -12,7 +12,7 @@ A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
     weights/               model weights (stay on the server)
     wandb/                 W&B's own files, only when W&B tracking is on
 
-status.json and stdout.log are written by the launcher, not here.
+status.json, stdout.log and job.sh are written by the launcher, not here.
 
 Use it from training code like this:
 
@@ -116,13 +116,15 @@ def _environment() -> dict:
 
 
 def _launch() -> dict:
-    """How the run was started. Phase 6 launchers refine this."""
+    """How the run was started. The launchers set LAUNCH_SCHEDULER; a direct run has "none"."""
+    scheduler = os.environ.get("LAUNCH_SCHEDULER") or "none"
     if os.environ.get("SLURM_JOB_ID"):
         scheduler, job_id = "slurm", os.environ["SLURM_JOB_ID"]
-    elif os.environ.get("TMUX"):
-        scheduler, job_id = "tmux", None
+    elif scheduler == "tmux":
+        # The tmux session is named after the run ID.
+        job_id = os.environ.get("RUN_ID")
     else:
-        scheduler, job_id = "none", None
+        job_id = None
     return {"scheduler": scheduler, "job_id": job_id, "command": shlex.join(sys.argv)}
 
 

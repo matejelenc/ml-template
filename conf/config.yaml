@@ -29,6 +29,11 @@ wandb:
   # Your W&B user or team. null means your default.
   entity: ${env:WANDB_ENTITY,null}
 
+# Journal entry in the Overleaf project, pushed when a run finishes.
+# Scratch runs never export. To skip it for one run: journal.export=false
+journal:
+  export: true
+
 # Settings of the toy experiment. Replace with your own.
 train:
   steps: 200

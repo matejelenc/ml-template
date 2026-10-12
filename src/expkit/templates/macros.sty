@@ -1,0 +1,68 @@
+% Macros for the research journal. Written by expkit on every export: do not edit here,
+% changes are overwritten. Edit src/expkit/templates/macros.sty in the code repository.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{generated/macros}[expkit journal macros]
+
+\RequirePackage{booktabs}
+\RequirePackage{graphicx}
+\RequirePackage{hyperref}
+
+% --- Macros you write by hand in journal.tex ---------------------------------
+
+% \experiment{012-lora}             heading of an experiment entry
+\newcommand{\experiment}[1]{\subsection*{Experiment \texttt{#1}}}
+% \hypothesis{What I expect and why.}
+\newcommand{\hypothesis}[1]{\par\smallskip\noindent\textbf{Hypothesis.} #1\par}
+% \conclusion{What the result means.}
+\newcommand{\conclusion}[1]{\par\smallskip\noindent\textbf{Conclusion.} #1\par}
+% \meeting{2026-10-12}{Ana, Bor}{Notes.}
+\newcommand{\meeting}[3]{\subsection*{Meeting, #1}\noindent\textit{With #2.}\par\smallskip #3\par}
+% \decision{What was decided.}
+\newcommand{\decision}[1]{\par\smallskip\noindent\textbf{Decision.} #1\par}
+
+% --- Macros used only by generated entries (generated/<experiment>/entry.tex) ---
+
+% \expfacts{date}{run ID}{git tag}{commit}{host}{duration}
+\newcommand{\expfacts}[6]{%
+  \par\smallskip\noindent
+  \begin{tabular}{@{}ll@{}}
+    Date & #1 \\
+    Run & \texttt{#2} \\
+    Code & \texttt{#3} at commit \texttt{#4} \\
+    Host & \texttt{#5} \\
+    Duration & #6 \\
+  \end{tabular}\par}
+% Shown when the run used code with uncommitted changes.
+\newcommand{\expdirty}{\par\noindent\textbf{Warning:} the code had uncommitted changes.\par}
+% \expwandb{https://wandb.ai/...}
+\newcommand{\expwandb}[1]{\par\noindent W\&B: \url{#1}\par}
+
+% Config changes against the base config: one \expchange{setting}{baseline}{this run} per row.
+\newenvironment{expconfig}{%
+  \par\medskip\noindent
+  \begin{tabular}{@{}lll@{}}
+    \toprule Setting & Baseline & This run \\ \midrule}{%
+    \bottomrule
+  \end{tabular}\par}
+\newcommand{\expchange}[3]{\texttt{#1} & #2 & #3 \\}
+\newcommand{\expnochanges}{\par\medskip\noindent Config: identical to the base config.\par}
+\newcommand{\expnobaseline}{\par\medskip\noindent Config: no base config was recorded for this run.\par}
+
+% Final metrics: one \expmetric{name}{value} per row.
+\newenvironment{expmetrics}{%
+  \par\medskip\noindent
+  \begin{tabular}{@{}lr@{}}
+    \toprule Metric & Value \\ \midrule}{%
+    \bottomrule
+  \end{tabular}\par}
+\newcommand{\expmetric}[2]{\texttt{#1} & #2 \\}
+
+% \expfigure{generated/012-lora/loss.pdf}{caption}
+\newcommand{\expfigure}[2]{%
+  \par\medskip\noindent
+  \begin{minipage}{\linewidth}\centering
+    \includegraphics[width=0.75\linewidth]{#1}\par\smallskip
+    {\small\texttt{#2}}
+  \end{minipage}\par}
+% \expskipped{file name}{reason}
+\newcommand{\expskipped}[2]{\par\noindent\textit{Figure \texttt{#1} not included: #2.}\par}

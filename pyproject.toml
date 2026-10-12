@@ -9,6 +9,7 @@ dependencies = [
     # Behaviour is pinned in scripts/experiment.py with version_base="1.2".
     "hydra-core>=1.2,<2",
     # Loads per-server settings and secrets from .env.
+    "matplotlib>=3.5",
     "python-dotenv>=1.0",
     "wandb>=0.16",
 ]

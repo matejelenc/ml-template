@@ -13,8 +13,8 @@ import hydra
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
-from expkit import record, tracking
-from expkit.config import register_resolvers
+from expkit import journal, record, tracking
+from expkit.config import SCRATCH, register_resolvers
 from expkit.redact import redact
 
 # Read .env before Hydra builds the config, because the config uses RUNS_DIR and DATA_DIR.
@@ -36,9 +36,27 @@ def train(cfg: DictConfig, run: record.Run) -> float:
         if step % cfg.train.log_every == 0:
             print(f"step {step:4d}  loss {loss:.6f}")
             run.log(step=step, loss=loss)
+    plot_loss(run)
     # Weights go into the run folder. A real project would call torch.save here.
     (run.weights_dir / "model.json").write_text(json.dumps({"w": w, "b": b}))
     return loss
+
+
+def plot_loss(run: record.Run) -> None:
+    """Save the loss curve as a PDF in artifacts/. The journal entry includes every figure there."""
+    import matplotlib
+
+    matplotlib.use("Agg")  # no display needed on a server
+    import matplotlib.pyplot as plt
+
+    rows = [json.loads(line) for line in (run.dir / "metrics.jsonl").read_text().splitlines()]
+    figure, axis = plt.subplots(figsize=(5, 3))
+    axis.plot([row["step"] for row in rows], [row["loss"] for row in rows])
+    axis.set(xlabel="step", ylabel="loss", yscale="log")
+    figure.tight_layout()
+    # A fixed creation date keeps the file identical between identical runs.
+    figure.savefig(run.artifacts_dir / "loss.pdf", metadata={"CreationDate": None})
+    plt.close(figure)
 
 
 # version_base pins Hydra's defaults, so every Hydra version from 1.2 on behaves the same.
@@ -52,6 +70,9 @@ def main(cfg: DictConfig) -> None:
     run.finish(metrics={"loss": final_loss})
     print(f"final loss {final_loss:.6f}")
     print(f"run folder: {run.dir}")
+    # Scratch runs are for debugging and get no journal entry.
+    if cfg.journal.export and cfg.experiment_id != SCRATCH:
+        journal.export_at_job_end(run.dir)
 
 
 if __name__ == "__main__":

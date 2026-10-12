@@ -3,6 +3,7 @@
 
 # The clone of the Overleaf project (overleaf_template/ is the tracked source)
 overleaf/
+overleaf.lock
 
 # Run outputs and data stay on the server
 runs/

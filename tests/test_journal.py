@@ -1,0 +1,455 @@
+"""Journal export: rendering, the stub in journal.tex, and syncing with a git remote.
+
+A local bare git repository stands in for Overleaf. Nothing leaves this machine.
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from omegaconf import OmegaConf
+
+import expkit
+from expkit import journal, record
+
+REPO = Path(__file__).resolve().parents[1]
+TEMPLATE = REPO / "overleaf_template"
+
+
+def git(repo, *args):
+    result = subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def make_run(tmp_path, experiment_id="001-toy", run_id="20260101-120000-abcd",
+             metrics=None, config=None, base=None, figures=("loss.pdf",)):
+    """A finished run folder, made with the real record code."""
+    run_dir = tmp_path / "runs" / experiment_id / run_id
+    config = config or {"seed": 1, "train": {"lr": 0.1, "steps": 200}}
+    base = base or {"seed": 0, "train": {"lr": 0.05, "steps": 200}}
+    cfg = OmegaConf.create(
+        {"experiment_id": experiment_id, "run_id": run_id, "paths": {"run_dir": str(run_dir)},
+         **config}
+    )
+    run = record.start(cfg)
+    record._write_config(run.dir / "config.base.yaml", base)
+    for name in figures:
+        path = run.artifacts_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 fake")
+    run.finish(metrics=metrics or {"loss": 0.012345, "val_acc": 0.9})
+    return run.dir
+
+
+@pytest.fixture
+def remote(tmp_path):
+    """A bare repository that plays Overleaf, holding the project template."""
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    seed = clone(remote, tmp_path / "seed")
+    shutil.copytree(TEMPLATE, seed, dirs_exist_ok=True)
+    git(seed, "add", ".")
+    git(seed, "commit", "-q", "-m", "template")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    return remote
+
+
+def clone(remote, dest):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    git(dest.parent, "clone", "-q", str(remote), str(dest))
+    git(dest, "config", "user.email", "test@example.com")
+    git(dest, "config", "user.name", "Test")
+    return dest
+
+
+def remote_file(remote, path):
+    return git(remote, "show", f"main:{path}")
+
+
+def web_edit(remote, tmp_path, text, name="web"):
+    """Simulate an edit made in the Overleaf web editor: append to journal.tex and push."""
+    web = tmp_path / name
+    if not web.exists():
+        clone(remote, web)
+    git(web, "pull", "-q", "--rebase")
+    with open(web / "journal.tex", "a") as file:
+        file.write(text)
+    git(web, "commit", "-q", "-am", "web edit")
+    git(web, "push", "-q", "origin", "HEAD:main")
+
+
+# --- text helpers -----------------------------------------------------------------
+
+def test_tex_escape():
+    assert journal.tex_escape("train_loss 50% {a} #1 $x$ a&b") == (
+        r"train\_loss 50\% \{a\} \#1 \$x\$ a\&b"
+    )
+    assert journal.tex_escape("a\\b~c^d") == r"a\textbackslash{}b\textasciitilde{}c\textasciicircum{}d"
+
+
+def test_format_value():
+    assert journal.format_value(0.000123456) == "0.0001235"
+    assert journal.format_value(3) == "3"
+    assert journal.format_value([1, 2]) == "[1, 2]"
+    assert journal.format_value(None) == "None"
+    long = journal.format_value("x" * 200)
+    assert len(long) == journal.MAX_VALUE_LENGTH and long.endswith("...")
+
+
+@pytest.mark.parametrize("seconds, text", [(0.4, "0 s"), (59, "59 s"), (185, "3m 05s"), (3720, "1h 02m")])
+def test_format_duration(seconds, text):
+    assert journal.format_duration(seconds) == text
+
+
+# --- config diff -------------------------------------------------------------------
+
+def test_config_diff_changed_added_removed():
+    base = {"seed": 0, "train": {"lr": 0.05, "steps": 200}, "old": 1}
+    config = {"seed": 0, "train": {"lr": 0.1, "steps": 200, "warmup": 10}}
+    rows = journal.config_diff(base, config)
+    assert [(name, journal._diff_cell(a), journal._diff_cell(b)) for name, a, b in rows] == [
+        ("old", "1", "---"), ("train.lr", "0.05", "0.1"), ("train.warmup", "---", "10"),
+    ]
+
+
+def test_config_diff_ignores_keys_that_are_not_settings():
+    base = {"run_id": "a", "experiment_id": "x", "paths": {"run_dir": "/a"},
+            "wandb": {"mode": "online"}, "journal": {"export": True}, "seed": 0}
+    config = {"run_id": "b", "experiment_id": "y", "paths": {"run_dir": "/b"},
+              "wandb": {"mode": "offline"}, "journal": {"export": False}, "seed": 0}
+    assert journal.config_diff(base, config) == []
+
+
+# --- writing an entry --------------------------------------------------------------
+
+def test_write_entry_creates_the_expected_files(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    journal.write_entry(make_run(tmp_path), out)
+    assert sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()) == [
+        "generated/001-toy/entry.tex", "generated/001-toy/loss.pdf", "generated/macros.sty",
+        "journal.tex",
+    ]
+
+
+def test_entry_contains_the_facts(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path)
+    journal.write_entry(run_dir, out)
+    entry = (out / "generated/001-toy/entry.tex").read_text()
+    first_line = entry.splitlines()[0]
+    assert first_line == f"% Generated by expkit {expkit.__version__} from run 20260101-120000-abcd."
+    assert r"\expchange{seed}{0}{1}" in entry
+    assert r"\expchange{train.lr}{0.05}{0.1}" in entry
+    assert "train.steps" not in entry  # unchanged setting
+    assert r"\expmetric{loss}{0.01235}" in entry
+    assert r"\expmetric{val\_acc}{0.9}" in entry
+    assert r"\expfigure{generated/001-toy/loss.pdf}" in entry
+    assert "expwandb" not in entry  # no URL recorded
+
+
+def test_entry_shows_wandb_url_and_identical_config(tmp_path):
+    same = {"seed": 0}
+    run_dir = make_run(tmp_path, config=same, base=same)
+    info = json.loads((run_dir / "run.json").read_text())
+    info["wandb_url"] = "https://wandb.ai/me/p/runs/abc"
+    (run_dir / "run.json").write_text(json.dumps(info))
+    entry = journal.render_entry(run_dir, [], [])
+    assert r"\expwandb{https://wandb.ai/me/p/runs/abc}" in entry
+    assert r"\expnochanges" in entry
+
+
+def test_entry_without_recorded_base_config(tmp_path):
+    run_dir = make_run(tmp_path)
+    (run_dir / "config.base.yaml").unlink()
+    assert r"\expnobaseline" in journal.render_entry(run_dir, [], [])
+
+
+def test_stub_is_appended_once_and_user_text_is_kept(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "journal.tex").write_text("% my notes\n\\meeting{2026-01-01}{Ana}{Hello}")
+    run_dir = make_run(tmp_path)
+    journal.write_entry(run_dir, out)
+    journal.write_entry(run_dir, out)
+    text = (out / "journal.tex").read_text()
+    assert text.startswith("% my notes\n\\meeting{2026-01-01}{Ana}{Hello}\n")
+    assert text.count("% exp:001-toy") == 1
+    assert text.count(r"\input{generated/001-toy/entry}") == 1
+    assert r"\hypothesis{}" in text and r"\conclusion{}" in text
+
+
+def test_filled_in_stub_is_never_touched(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path)
+    journal.write_entry(run_dir, out)
+    edited = (out / "journal.tex").read_text().replace(r"\hypothesis{}", r"\hypothesis{It works.}")
+    (out / "journal.tex").write_text(edited)
+    journal.write_entry(run_dir, out)
+    assert (out / "journal.tex").read_text() == edited
+
+
+def test_each_experiment_gets_its_own_stub(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    journal.write_entry(make_run(tmp_path, "001-toy"), out)
+    journal.write_entry(make_run(tmp_path, "0012-toy"), out)  # similar name, different experiment
+    text = (out / "journal.tex").read_text()
+    assert "% exp:001-toy\n" in text and "% exp:0012-toy\n" in text
+
+
+def test_generated_folder_and_macros_are_overwritten(tmp_path):
+    out = tmp_path / "out"
+    (out / "generated/001-toy").mkdir(parents=True)
+    (out / "generated/001-toy/stale.pdf").write_text("old")
+    (out / "generated/macros.sty").write_text("old macros")
+    (out / "generated/002-other").mkdir()
+    (out / "generated/002-other/entry.tex").write_text("other experiment")
+    journal.write_entry(make_run(tmp_path), out)
+    assert not (out / "generated/001-toy/stale.pdf").exists()
+    assert "ProvidesPackage" in (out / "generated/macros.sty").read_text()
+    assert (out / "generated/002-other/entry.tex").read_text() == "other experiment"
+
+
+def test_figure_names_are_made_safe_and_non_figures_are_left_out(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path, figures=("plots/val loss_v2.PDF", "table.csv", "curve.png"))
+    journal.write_entry(run_dir, out)
+    assert sorted(p.name for p in (out / "generated/001-toy").iterdir()) == [
+        "curve.png", "entry.tex", "plots-val-loss-v2.pdf",
+    ]
+
+
+def test_size_guard_skips_large_files(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path, figures=("a.pdf", "b.pdf", "c.pdf"))
+    (run_dir / "artifacts/b.pdf").write_bytes(b"x" * 500)
+    monkeypatch.setattr(journal, "MAX_FILE_BYTES", 100)
+    journal.write_entry(run_dir, out)
+    assert not (out / "generated/001-toy/b.pdf").exists()
+    entry = (out / "generated/001-toy/entry.tex").read_text()
+    assert r"\expskipped{b.pdf}" in entry and "generated/001-toy/b.pdf" not in entry
+
+
+def test_size_guard_limits_the_whole_entry(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path, figures=("a.pdf", "b.pdf", "c.pdf"))
+    monkeypatch.setattr(journal, "MAX_ENTRY_BYTES", 30)  # each fake figure is 13 bytes
+    journal.write_entry(run_dir, out)
+    assert sorted(p.name for p in (out / "generated/001-toy").iterdir()) == [
+        "a.pdf", "b.pdf", "entry.tex",
+    ]
+
+
+def test_weights_never_reach_the_export(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path)
+    (run_dir / "weights/model.pt").write_bytes(b"w" * 1000)
+    (run_dir / "artifacts/model.pt").write_bytes(b"w" * 1000)
+    journal.write_entry(run_dir, out)
+    assert not list(out.rglob("*.pt"))
+
+
+# --- finding runs ------------------------------------------------------------------
+
+def test_find_run_picks_the_newest_finished_run(tmp_path):
+    make_run(tmp_path, run_id="20260101-120000-aaaa")
+    newest = make_run(tmp_path, run_id="20260102-120000-bbbb")
+    unfinished = make_run(tmp_path, run_id="20260103-120000-cccc")
+    (unfinished / "summary.json").unlink()
+    runs = tmp_path / "runs"
+    assert journal.find_run("001-toy", runs_dir=runs) == newest
+    assert journal.find_run("001-toy", "20260101-120000-aaaa", runs_dir=runs).name.endswith("aaaa")
+    with pytest.raises(FileNotFoundError):
+        journal.find_run("999-missing", runs_dir=runs)
+
+
+# --- sync ----------------------------------------------------------------------------
+
+def test_sync_pushes_and_is_idempotent(tmp_path, remote):
+    local = clone(remote, tmp_path / "overleaf")
+    run_dir = make_run(tmp_path)
+    assert journal.sync(run_dir, local) == "pushed"
+    assert r"\expmetric{loss}" in remote_file(remote, "generated/001-toy/entry.tex")
+    assert "% exp:001-toy" in remote_file(remote, "journal.tex")
+    assert "ProvidesPackage" in remote_file(remote, "generated/macros.sty")
+    commits = git(remote, "rev-list", "--count", "main")
+    assert journal.sync(run_dir, local) == "unchanged"
+    assert git(remote, "rev-list", "--count", "main") == commits
+
+
+def test_sync_refreshes_the_entry_of_a_newer_run(tmp_path, remote):
+    local = clone(remote, tmp_path / "overleaf")
+    journal.sync(make_run(tmp_path, run_id="20260101-120000-aaaa"), local)
+    newer = make_run(tmp_path, run_id="20260102-120000-bbbb", metrics={"loss": 0.5})
+    assert journal.sync(newer, local) == "pushed"
+    assert "20260102-120000-bbbb" in remote_file(remote, "generated/001-toy/entry.tex")
+    assert remote_file(remote, "journal.tex").count("% exp:001-toy") == 1
+
+
+def test_sync_keeps_edits_made_in_overleaf(tmp_path, remote):
+    local = clone(remote, tmp_path / "overleaf")
+    journal.sync(make_run(tmp_path), local)
+    web_edit(remote, tmp_path, "\\meeting{2026-01-05}{Ana}{Web note}\n")
+    journal.sync(make_run(tmp_path, "002-next"), local)
+    text = remote_file(remote, "journal.tex")
+    assert "Web note" in text and "% exp:001-toy" in text and "% exp:002-next" in text
+
+
+def test_sync_retries_when_someone_pushes_in_between(tmp_path, remote):
+    """The Overleaf project changes after our pull and before our push."""
+    local = clone(remote, tmp_path / "overleaf")
+    calls = []
+
+    def push_from_elsewhere():
+        if not calls:  # only before the first push attempt
+            web_edit(remote, tmp_path, "\\decision{Made in the browser}\n")
+        calls.append(1)
+
+    assert journal.sync(make_run(tmp_path), local, _before_push=push_from_elsewhere) == "pushed"
+    assert len(calls) == 2  # first push rejected, second accepted
+    text = remote_file(remote, "journal.tex")
+    assert "Made in the browser" in text and text.count("% exp:001-toy") == 1
+    assert git(local, "status", "--porcelain") == ""
+    assert git(local, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+
+
+def test_sync_gives_up_cleanly_when_push_never_works(tmp_path, remote, monkeypatch):
+    local = clone(remote, tmp_path / "overleaf")
+    before = git(local, "rev-parse", "HEAD")
+    monkeypatch.setattr(journal, "PUSH_ATTEMPTS", 2)
+    monkeypatch.setattr(journal, "RETRY_WAIT_SECONDS", 0)
+    # A hook that rejects every push stands in for a server that refuses.
+    hook = remote / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'rejected by test' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    with pytest.raises(journal.SyncError, match="push to Overleaf failed 2 times"):
+        journal.sync(make_run(tmp_path), local)
+    assert git(local, "rev-parse", "HEAD") == before  # no unpushed commit left behind
+    assert git(local, "status", "--porcelain") == ""
+
+
+def test_sync_refuses_a_clone_with_local_changes(tmp_path, remote):
+    local = clone(remote, tmp_path / "overleaf")
+    (local / "journal.tex").write_text("my local edit\n")
+    with pytest.raises(journal.SyncError, match="has local changes"):
+        journal.sync(make_run(tmp_path), local)
+    assert (local / "journal.tex").read_text() == "my local edit\n"  # untouched
+    assert not (local / "generated").exists()
+
+
+def test_sync_clones_a_missing_clone(tmp_path, remote, monkeypatch):
+    monkeypatch.setenv("OVERLEAF_GIT_URL", str(remote))
+    monkeypatch.setenv("OVERLEAF_TOKEN", "token-value-123456")
+    local = tmp_path / "new-server" / "overleaf"
+    assert journal.sync(make_run(tmp_path), local) == "pushed"
+    assert "% exp:001-toy" in remote_file(remote, "journal.tex")
+    # The token is not stored anywhere in the clone.
+    for path in (local / ".git").rglob("*"):
+        if path.is_file():
+            assert b"token-value-123456" not in path.read_bytes(), path
+
+
+def test_sync_without_clone_or_url_fails_clearly(tmp_path, monkeypatch):
+    monkeypatch.delenv("OVERLEAF_GIT_URL", raising=False)
+    with pytest.raises(journal.SyncError, match="OVERLEAF_GIT_URL is not set"):
+        journal.sync(make_run(tmp_path), tmp_path / "overleaf")
+
+
+def test_two_jobs_finishing_at_the_same_time(tmp_path, remote):
+    """Six exports at once: three servers (clones), two jobs each. All must arrive."""
+    script = "import sys; from expkit import journal; print(journal.sync(sys.argv[1], sys.argv[2]))"
+    processes = []
+    for server in range(3):
+        local = clone(remote, tmp_path / f"server{server}" / "overleaf")
+        for job in range(2):
+            run_dir = make_run(tmp_path, f"{server}{job}0-exp")
+            processes.append(subprocess.Popen(
+                [sys.executable, "-c", script, str(run_dir), str(local)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ))
+    for process in processes:
+        out, err = process.communicate(timeout=120)
+        assert process.returncode == 0 and out.strip() == "pushed", err
+    text = remote_file(remote, "journal.tex")
+    for server in range(3):
+        for job in range(2):
+            experiment_id = f"{server}{job}0-exp"
+            assert text.count(f"% exp:{experiment_id}\n") == 1
+            assert remote_file(remote, f"generated/{experiment_id}/entry.tex")
+
+
+# --- entry points ----------------------------------------------------------------------
+
+def test_export_to_a_folder_pushes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("OVERLEAF_DIR", str(tmp_path / "must-not-be-created"))
+    result = journal.export(make_run(tmp_path), out=tmp_path / "upload")
+    assert result.startswith("written to")
+    assert (tmp_path / "upload/generated/001-toy/entry.tex").is_file()
+    assert not (tmp_path / "must-not-be-created").exists()
+
+
+def test_export_at_job_end_never_raises(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("OVERLEAF_DIR", str(tmp_path / "missing"))
+    monkeypatch.delenv("OVERLEAF_GIT_URL", raising=False)
+    journal.export_at_job_end(make_run(tmp_path))
+    assert "Journal export failed" in caplog.text
+    assert "make journal EXP=001-toy" in caplog.text
+    journal.export_at_job_end(tmp_path / "not-a-run")  # even with a broken run folder
+
+
+# --- LaTeX ---------------------------------------------------------------------------
+
+def _latex_compiler():
+    for name in ("tectonic", "latexmk", "pdflatex"):
+        if shutil.which(name):
+            return name
+    return None
+
+
+@pytest.mark.skipif(_latex_compiler() is None, reason="no LaTeX compiler installed")
+def test_template_with_entries_compiles(tmp_path):
+    """The Overleaf template plus generated entries must compile, awkward characters included."""
+    project = tmp_path / "project"
+    shutil.copytree(TEMPLATE, project)
+    journal.write_entry(make_run(tmp_path), project)
+    journal.write_entry(
+        make_run(
+            tmp_path, "002-awkward_name",
+            metrics={"val/acc_top1": 0.5, "50%_quantile": 1e-9, "a&b": float("nan")},
+            config={"model": {"name": "org/model_v2", "path": "C:\\dir\\{x}", "tags": ["a_b", "#1"]},
+                    "note": "100% $ ~ ^", "long": "x" * 300},
+            base={"model": {"name": None}},
+            figures=("plots/val loss_v2.pdf",),
+        ),
+        project,
+    )
+    # A real one-page PDF, so \includegraphics has something to load.
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    for pdf in (project / "generated").rglob("*.pdf"):
+        figure = plt.figure(figsize=(2, 1))
+        figure.savefig(pdf)
+        plt.close(figure)
+    with open(project / "journal.tex", "a") as file:
+        file.write("\\meeting{2026-01-01}{Ana, Bor}{Notes.}\n\\decision{Go on.}\n")
+
+    compiler = _latex_compiler()
+    command = {
+        "tectonic": ["tectonic", "main.tex"],
+        "latexmk": ["latexmk", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
+        "pdflatex": ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
+    }[compiler]
+    result = subprocess.run(command, cwd=project, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    assert (project / "main.pdf").stat().st_size > 1000

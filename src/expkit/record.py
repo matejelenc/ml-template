@@ -4,6 +4,8 @@ A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
 
     run.json               where the run came from (code, machine, command), written at start
     config.resolved.yaml   the final merged config, secrets redacted
+    config.base.yaml       conf/config.yaml alone, without experiment file or command-line
+                           overrides: the baseline that journal entries compare against
     metrics.jsonl          one JSON object per line: {"step": 100, "loss": 0.42}
     summary.json           final metrics, weight files and artifacts, written at the end
     artifacts/             plots and tables (small)
@@ -47,8 +49,9 @@ log = logging.getLogger(__name__)
 # Raise this number whenever a field is renamed, removed or changes meaning.
 SCHEMA_VERSION = 1
 
-# Config keys that differ between two runs of the same settings. Left out of config_sha256.
-_NOT_SETTINGS = ("experiment_id", "run_id", "paths")
+# Config keys that are not experiment settings: they can differ between two runs of the same
+# experiment. Left out of config_sha256 and of the config diff in journal entries.
+NOT_SETTINGS = ("experiment_id", "run_id", "paths", "wandb", "journal")
 
 
 def utc_now() -> str:
@@ -74,7 +77,7 @@ def write_json(path: Path, data: dict) -> None:
 
 def config_hash(config: dict) -> str:
     """SHA-256 of the settings. Equal for two runs with the same settings, on any server."""
-    settings = {key: value for key, value in config.items() if key not in _NOT_SETTINGS}
+    settings = {key: value for key, value in config.items() if key not in NOT_SETTINGS}
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
 
 
@@ -191,6 +194,24 @@ class Run:
             self.wandb = None
 
 
+def _base_config() -> Optional[dict]:
+    """The base config with no experiment file and no overrides, or None outside a Hydra app."""
+    try:
+        from hydra import compose
+        from hydra.core.hydra_config import HydraConfig
+
+        base = compose(config_name=HydraConfig.get().job.config_name)
+        return OmegaConf.to_container(base, resolve=True)
+    except Exception as error:  # noqa: BLE001 - the baseline is optional
+        log.warning("Could not build the base config, journal entries will show no diff: %s", error)
+        return None
+
+
+def _write_config(path: Path, config: dict) -> None:
+    with open(path, "w") as file:
+        yaml.safe_dump({"schema_version": SCHEMA_VERSION, "config": config}, file, sort_keys=False)
+
+
 def _files(folder: Path) -> List[Path]:
     """All files below a folder, sorted, so the listing is the same every time."""
     return sorted(path for path in folder.rglob("*") if path.is_file())
@@ -206,8 +227,10 @@ def start(cfg: DictConfig) -> Run:
     run.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     config = redact(OmegaConf.to_container(cfg, resolve=True))
-    with open(run.dir / "config.resolved.yaml", "w") as file:
-        yaml.safe_dump({"schema_version": SCHEMA_VERSION, "config": config}, file, sort_keys=False)
+    _write_config(run.dir / "config.resolved.yaml", config)
+    base = _base_config()
+    if base is not None:
+        _write_config(run.dir / "config.base.yaml", redact(base))
 
     run_info = {
         "schema_version": SCHEMA_VERSION,

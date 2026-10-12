@@ -11,9 +11,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 def run_experiment(tmp_path, *args, run_id="test-run"):
     """Run scripts/experiment.py with run folders redirected to a temp folder."""
-    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "RUN_ID": run_id}
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "OVERLEAF_DIR": str(tmp_path / "no-overleaf"), "OVERLEAF_GIT_URL": "", "RUN_ID": run_id}
     return subprocess.run(
-        [sys.executable, "scripts/experiment.py", "train.steps=20", *args],
+        [sys.executable, "scripts/experiment.py", "train.steps=20", "journal.export=false", *args],
         cwd=REPO, env=env, capture_output=True, text=True,
     )
 
@@ -58,13 +58,15 @@ def test_run_folder_matches_the_schema(tmp_path):
     assert result.returncode == 0, result.stderr
     run_dir = tmp_path / "001-toy" / "test-run"
     assert sorted(path.name for path in run_dir.iterdir()) == [
-        "artifacts", "config.resolved.yaml", "metrics.jsonl", "run.json", "summary.json", "weights",
+        "artifacts", "config.base.yaml", "config.resolved.yaml", "metrics.jsonl", "run.json",
+        "summary.json", "weights",
     ]  # in particular: no .hydra folder and no Hydra log file
     assert (run_dir / "weights" / "model.json").is_file()
+    assert (run_dir / "artifacts" / "loss.pdf").is_file()
 
 
 def test_run_id_is_generated_without_the_launcher(tmp_path):
-    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled"}
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "OVERLEAF_DIR": str(tmp_path / "no-overleaf"), "OVERLEAF_GIT_URL": ""}
     env.pop("RUN_ID", None)
     result = subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20"],
@@ -77,7 +79,7 @@ def test_run_id_is_generated_without_the_launcher(tmp_path):
 
 
 def test_secret_on_the_command_line_is_not_printed_or_saved(tmp_path):
-    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "RUN_ID": "test-run",
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "OVERLEAF_DIR": str(tmp_path / "no-overleaf"), "OVERLEAF_GIT_URL": "", "RUN_ID": "test-run",
            "MY_API_KEY": "secret-value-123456"}
     result = subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20", "+note=secret-value-123456"],
@@ -87,12 +89,12 @@ def test_secret_on_the_command_line_is_not_printed_or_saved(tmp_path):
     assert "secret-value-123456" not in result.stdout
     for path in tmp_path.rglob("*"):
         if path.is_file():
-            assert "secret-value-123456" not in path.read_text(), path.name
+            assert b"secret-value-123456" not in path.read_bytes(), path.name
 
 
 def test_empty_variables_in_env_count_as_unset(tmp_path):
     # A line such as "WANDB_ENTITY=" in .env must not turn into an empty setting.
-    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "RUN_ID": "test-run",
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "OVERLEAF_DIR": str(tmp_path / "no-overleaf"), "OVERLEAF_GIT_URL": "", "RUN_ID": "test-run",
            "DATA_DIR": "", "WANDB_ENTITY": "", "WANDB_PROJECT": ""}
     result = subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20"],

@@ -8,6 +8,7 @@ A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
     summary.json           final metrics, weight files and artifacts, written at the end
     artifacts/             plots and tables (small)
     weights/               model weights (stay on the server)
+    wandb/                 W&B's own files, only when W&B tracking is on
 
 status.json and stdout.log are written by the launcher, not here.
 
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import re
@@ -39,6 +41,8 @@ from omegaconf import DictConfig, OmegaConf
 
 from expkit import gitutil
 from expkit.redact import redact
+
+log = logging.getLogger(__name__)
 
 # Raise this number whenever a field is renamed, removed or changes meaning.
 SCHEMA_VERSION = 1
@@ -133,12 +137,18 @@ class Run:
         self.dir = run_dir
         self.weights_dir = run_dir / "weights"
         self.artifacts_dir = run_dir / "artifacts"
+        # Set by tracking.start(). While it is None, nothing is sent to W&B.
+        self.wandb: Any = None
         self._started = time.monotonic()
 
     def log(self, step: int, **metrics: Any) -> None:
-        """Append one line to metrics.jsonl: run.log(step=100, loss=0.42)."""
+        """Append one line to metrics.jsonl: run.log(step=100, loss=0.42).
+
+        Also sends the metrics to W&B when tracking is on.
+        """
         with open(self.dir / "metrics.jsonl", "a") as file:
             file.write(json.dumps({"step": step, **metrics}, default=_plain) + "\n")
+        self._wandb("log", metrics, step=step)
 
     def update(self, **fields: Any) -> None:
         """Add or change fields in run.json, e.g. run.update(wandb_url=...)."""
@@ -146,7 +156,10 @@ class Run:
         write_json(path, redact({**json.loads(path.read_text()), **fields}))
 
     def finish(self, metrics: Optional[Dict[str, Any]] = None) -> dict:
-        """Write summary.json: final metrics, every file in weights/ and artifacts/."""
+        """Write summary.json: final metrics, every file in weights/ and artifacts/.
+
+        Also closes the W&B run when tracking is on.
+        """
         summary = {
             "schema_version": SCHEMA_VERSION,
             "finished_at": utc_now(),
@@ -163,7 +176,19 @@ class Run:
             "artifacts": [str(path.relative_to(self.dir)) for path in _files(self.artifacts_dir)],
         }
         write_json(self.dir / "summary.json", summary)
+        self._wandb("log", {f"final/{name}": value for name, value in summary["metrics"].items()})
+        self._wandb("finish")
         return summary
+
+    def _wandb(self, method: str, *args: Any, **kwargs: Any) -> None:
+        """Call a method of the W&B run. A W&B error stops W&B tracking, never the training."""
+        if self.wandb is None:
+            return
+        try:
+            getattr(self.wandb, method)(*args, **kwargs)
+        except Exception as error:  # noqa: BLE001 - any W&B failure is non-fatal
+            log.warning("W&B failed, continuing without it: %s", error)
+            self.wandb = None
 
 
 def _files(folder: Path) -> List[Path]:

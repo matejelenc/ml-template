@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
@@ -38,10 +38,19 @@ def _experiment_id() -> str:
     return HydraConfig.get().runtime.choices.get("experiment") or SCRATCH
 
 
+def _env(name: str, default: Any = None) -> Any:
+    """An environment variable, or the default if it is unset or empty.
+
+    Unlike Hydra's own ${oc.env:...}, an empty line such as "RUNS_DIR=" in .env counts as unset.
+    """
+    return os.environ.get(name) or default
+
+
 def register_resolvers() -> None:
-    """Make ${experiment_id:} and ${run_id:} usable in the config.
+    """Make ${experiment_id:}, ${run_id:} and ${env:NAME,default} usable in the config.
 
     Call this before @hydra.main runs.
     """
+    OmegaConf.register_new_resolver("env", _env, replace=True)
     OmegaConf.register_new_resolver("experiment_id", _experiment_id, replace=True)
     OmegaConf.register_new_resolver("run_id", _get_run_id, replace=True)

@@ -13,7 +13,7 @@ import hydra
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
-from expkit import record
+from expkit import record, tracking
 from expkit.config import register_resolvers
 from expkit.redact import redact
 
@@ -47,6 +47,7 @@ def main(cfg: DictConfig) -> None:
     # Printed output ends up in log files, so secrets are removed here too.
     print(OmegaConf.to_yaml(redact(OmegaConf.to_container(cfg, resolve=True))))
     run = record.start(cfg)
+    tracking.start(cfg, run)
     final_loss = train(cfg, run)
     run.finish(metrics={"loss": final_loss})
     print(f"final loss {final_loss:.6f}")

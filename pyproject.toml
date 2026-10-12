@@ -10,6 +10,7 @@ dependencies = [
     "hydra-core>=1.2,<2",
     # Loads per-server settings and secrets from .env.
     "python-dotenv>=1.0",
+    "wandb>=0.16",
 ]
 
 [dependency-groups]

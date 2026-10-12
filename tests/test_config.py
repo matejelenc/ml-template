@@ -11,7 +11,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def run_experiment(tmp_path, *args, run_id="test-run"):
     """Run scripts/experiment.py with run folders redirected to a temp folder."""
-    env = {**os.environ, "RUNS_DIR": str(tmp_path), "RUN_ID": run_id}
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "RUN_ID": run_id}
     return subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20", *args],
         cwd=REPO, env=env, capture_output=True, text=True,
@@ -64,7 +64,7 @@ def test_run_folder_matches_the_schema(tmp_path):
 
 
 def test_run_id_is_generated_without_the_launcher(tmp_path):
-    env = {**os.environ, "RUNS_DIR": str(tmp_path)}
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled"}
     env.pop("RUN_ID", None)
     result = subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20"],
@@ -77,7 +77,7 @@ def test_run_id_is_generated_without_the_launcher(tmp_path):
 
 
 def test_secret_on_the_command_line_is_not_printed_or_saved(tmp_path):
-    env = {**os.environ, "RUNS_DIR": str(tmp_path), "RUN_ID": "test-run",
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "RUN_ID": "test-run",
            "MY_API_KEY": "secret-value-123456"}
     result = subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20", "+note=secret-value-123456"],
@@ -88,3 +88,17 @@ def test_secret_on_the_command_line_is_not_printed_or_saved(tmp_path):
     for path in tmp_path.rglob("*"):
         if path.is_file():
             assert "secret-value-123456" not in path.read_text(), path.name
+
+
+def test_empty_variables_in_env_count_as_unset(tmp_path):
+    # A line such as "WANDB_ENTITY=" in .env must not turn into an empty setting.
+    env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "RUN_ID": "test-run",
+           "DATA_DIR": "", "WANDB_ENTITY": "", "WANDB_PROJECT": ""}
+    result = subprocess.run(
+        [sys.executable, "scripts/experiment.py", "train.steps=20"],
+        cwd=REPO, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "data_dir: data" in result.stdout
+    assert "entity: null" in result.stdout
+    assert "project: ml-template" in result.stdout

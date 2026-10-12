@@ -17,9 +17,17 @@ seed: 0
 
 # Per-server paths come from .env, never from committed config.
 paths:
-  runs_dir: ${oc.env:RUNS_DIR,runs}
-  data_dir: ${oc.env:DATA_DIR,data}
+  runs_dir: ${env:RUNS_DIR,runs}
+  data_dir: ${env:DATA_DIR,data}
   run_dir: ${paths.runs_dir}/${experiment_id}/${run_id}
+
+# Weights & Biases. The API key (WANDB_API_KEY) and project name come from .env.
+wandb:
+  # online | offline | disabled. For a quick run without W&B: wandb.mode=disabled
+  mode: ${env:WANDB_MODE,online}
+  project: ${env:WANDB_PROJECT,ml-template}
+  # Your W&B user or team. null means your default.
+  entity: ${env:WANDB_ENTITY,null}
 
 # Settings of the toy experiment. Replace with your own.
 train:

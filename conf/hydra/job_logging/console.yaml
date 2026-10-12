@@ -1,0 +1,15 @@
+# Python logging for jobs: print to the terminal only.
+# The launcher saves the terminal output as stdout.log, so Hydra needs no log file of its own.
+version: 1
+formatters:
+  simple:
+    format: "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: simple
+    stream: ext://sys.stdout
+root:
+  level: INFO
+  handlers: [console]
+disable_existing_loggers: false

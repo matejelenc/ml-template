@@ -4,12 +4,14 @@
 
 defaults:
   - _self_
+  - override hydra/job_logging: console
 
 # Name of the chosen experiment file, e.g. "001-toy".
 # A run without +experiment=... is a debugging run and gets "scratch".
 experiment_id: ${experiment_id:}
-# Set by the launcher through RUN_ID. A direct run falls back to the start time.
-run_id: ${oc.env:RUN_ID,${now:%Y%m%d-%H%M%S}}
+# Start time plus four random characters, e.g. "20261012-195950-a3f1".
+# The launcher can fix it in advance through the RUN_ID environment variable.
+run_id: ${run_id:}
 
 seed: 0
 
@@ -31,3 +33,6 @@ hydra:
   job:
     # Stay in the repo root, so relative paths in code keep working.
     chdir: false
+  # No .hydra/ folder in the run folder: expkit writes config.resolved.yaml instead,
+  # with secrets redacted.
+  output_subdir: null

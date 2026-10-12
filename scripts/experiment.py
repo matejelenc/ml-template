@@ -6,20 +6,23 @@ Show the merged config without running:
     uv run python scripts/experiment.py +experiment=001-toy --cfg job --resolve
 """
 
+import json
 import random
 
 import hydra
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
+from expkit import record
 from expkit.config import register_resolvers
+from expkit.redact import redact
 
 # Read .env before Hydra builds the config, because the config uses RUNS_DIR and DATA_DIR.
 load_dotenv()
 register_resolvers()
 
 
-def train(cfg: DictConfig) -> float:
+def train(cfg: DictConfig, run: record.Run) -> float:
     """Fit y = 2x + 1 with gradient descent. Stands in for real training."""
     rng = random.Random(cfg.seed)
     w, b = 0.0, 0.0
@@ -32,15 +35,22 @@ def train(cfg: DictConfig) -> float:
         b -= cfg.train.lr * 2 * error
         if step % cfg.train.log_every == 0:
             print(f"step {step:4d}  loss {loss:.6f}")
+            run.log(step=step, loss=loss)
+    # Weights go into the run folder. A real project would call torch.save here.
+    (run.weights_dir / "model.json").write_text(json.dumps({"w": w, "b": b}))
     return loss
 
 
 # version_base pins Hydra's defaults, so every Hydra version from 1.2 on behaves the same.
 @hydra.main(version_base="1.2", config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    print(OmegaConf.to_yaml(cfg, resolve=True))
-    final_loss = train(cfg)
+    # Printed output ends up in log files, so secrets are removed here too.
+    print(OmegaConf.to_yaml(redact(OmegaConf.to_container(cfg, resolve=True))))
+    run = record.start(cfg)
+    final_loss = train(cfg, run)
+    run.finish(metrics={"loss": final_loss})
     print(f"final loss {final_loss:.6f}")
+    print(f"run folder: {run.dir}")
 
 
 if __name__ == "__main__":

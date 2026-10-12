@@ -1,5 +1,9 @@
 # Short names for common commands. Each one also works typed out by hand.
-.PHONY: test journal status
+.PHONY: setup test journal status
+
+# One-time setup on a machine: writes .env and connects the Overleaf project.
+setup:
+	uv run python scripts/setup.py
 
 test:
 	uv run pytest -q

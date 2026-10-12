@@ -1,0 +1,6 @@
+# @package _global_
+# Purpose: check that the pipeline works end to end.
+# Overrides only. Everything not listed here comes from conf/config.yaml.
+
+train:
+  lr: 0.1

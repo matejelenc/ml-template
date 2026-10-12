@@ -1,0 +1,23 @@
+# Secrets and per-machine settings
+.env
+
+# The clone of the Overleaf project (overleaf_template/ is the tracked source)
+overleaf/
+
+# Run outputs and data stay on the server
+runs/
+outputs/
+wandb/
+data/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/

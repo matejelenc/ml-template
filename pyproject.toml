@@ -1,0 +1,27 @@
+[project]
+name = "ml-template"
+version = "0.1.0"
+description = "Starting point for ML research projects: config, run records, launchers, journal export."
+# Wide on purpose. Narrow this in a project if one of its packages needs a specific Python.
+requires-python = ">=3.9"
+dependencies = [
+    # Loose range: uv picks whichever Hydra fits the project's Python and other packages.
+    # Behaviour is pinned in scripts/experiment.py with version_base="1.2".
+    "hydra-core>=1.2,<2",
+    # Loads per-server settings and secrets from .env.
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+# Makes `import expkit` work after `uv sync`.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/expkit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

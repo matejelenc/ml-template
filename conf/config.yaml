@@ -1,0 +1,33 @@
+# Base config. Every run starts from this file.
+# An experiment file in conf/experiment/ overrides parts of it:
+#   uv run python scripts/experiment.py +experiment=001-toy
+
+defaults:
+  - _self_
+
+# Name of the chosen experiment file, e.g. "001-toy".
+# A run without +experiment=... is a debugging run and gets "scratch".
+experiment_id: ${experiment_id:}
+# Set by the launcher through RUN_ID. A direct run falls back to the start time.
+run_id: ${oc.env:RUN_ID,${now:%Y%m%d-%H%M%S}}
+
+seed: 0
+
+# Per-server paths come from .env, never from committed config.
+paths:
+  runs_dir: ${oc.env:RUNS_DIR,runs}
+  data_dir: ${oc.env:DATA_DIR,data}
+  run_dir: ${paths.runs_dir}/${experiment_id}/${run_id}
+
+# Settings of the toy experiment. Replace with your own.
+train:
+  steps: 200
+  lr: 0.05
+  log_every: 20
+
+hydra:
+  run:
+    dir: ${paths.run_dir}
+  job:
+    # Stay in the repo root, so relative paths in code keep working.
+    chdir: false

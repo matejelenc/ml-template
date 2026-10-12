@@ -4,9 +4,10 @@ What is written, relative to the top folder of the Overleaf project:
 
     generated/macros.sty               overwritten on every export
     generated/<experiment_id>/         overwritten on every export: entry.tex and figures
-    journal.tex                        a stub is appended ONCE per experiment, nothing else
+    journal.tex                        a stub is added ONCE per experiment, nothing else
 
-Everything else in the Overleaf project belongs to you and is never touched.
+Everything else in the Overleaf project (main.tex with the paper, reports) belongs to you
+and is never touched.
 
     journal.export(run_dir)                  # push to Overleaf
     journal.export(run_dir, out="folder")    # write to a local folder instead (manual upload)
@@ -231,14 +232,30 @@ def stub(experiment_id: str) -> str:
     )
 
 
+# The journal skeleton that ships with the repository, used if journal.tex does not exist yet.
+JOURNAL_TEMPLATE = Path(__file__).resolve().parents[2] / "overleaf_template" / "journal.tex"
+_END_DOCUMENT = "\\end{document}"
+
+
 def _add_stub(journal: Path, experiment_id: str) -> None:
-    """Append the stub to journal.tex unless its marker is already there."""
-    text = journal.read_text() if journal.is_file() else "% Journal. See README.md.\n"
+    """Add the stub to journal.tex unless its marker is already there.
+
+    It goes just above the last \\end{document}, or at the end of a file that has none.
+    Nothing else in the file is changed.
+    """
+    if journal.is_file():
+        text = journal.read_text()
+    elif JOURNAL_TEMPLATE.is_file():
+        text = JOURNAL_TEMPLATE.read_text()
+    else:
+        raise FileNotFoundError(f"{journal} does not exist and {JOURNAL_TEMPLATE} is missing too")
     if re.search(rf"^% exp:{re.escape(experiment_id)}\s*$", text, flags=re.MULTILINE):
         return
-    if text and not text.endswith("\n"):
-        text += "\n"
-    journal.write_text(text + stub(experiment_id))
+    end = text.rfind(_END_DOCUMENT)
+    before, after = (text[:end], text[end:]) if end >= 0 else (text, "")
+    if before and not before.endswith("\n"):
+        before += "\n"
+    journal.write_text(before + stub(experiment_id) + ("\n" + after if after else ""))
 
 
 def write_macros(root: Path) -> None:

@@ -183,6 +183,29 @@ def test_stub_is_appended_once_and_user_text_is_kept(tmp_path):
     assert r"\hypothesis{}" in text and r"\conclusion{}" in text
 
 
+def test_stub_goes_above_end_document(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    document = "\\documentclass{article}\n\\begin{document}\nMy notes.\n\\end{document}\n"
+    (out / "journal.tex").write_text(document)
+    journal.write_entry(make_run(tmp_path, "001-toy"), out)
+    journal.write_entry(make_run(tmp_path, "002-next"), out)
+    text = (out / "journal.tex").read_text()
+    assert text.startswith("\\documentclass{article}\n\\begin{document}\nMy notes.\n")
+    assert text.endswith("\\conclusion{}\n\n\\end{document}\n")
+    assert text.count("\\end{document}") == 1
+    assert text.index("% exp:001-toy") < text.index("% exp:002-next") < text.index("\\end{document}")
+
+
+def test_missing_journal_is_created_from_the_template(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    journal.write_entry(make_run(tmp_path), out)
+    text = (out / "journal.tex").read_text()
+    assert "\\documentclass" in text and "\\usepackage{generated/macros}" in text
+    assert text.index("% exp:001-toy") < text.index("\\end{document}")
+
+
 def test_filled_in_stub_is_never_touched(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
@@ -417,8 +440,9 @@ def _latex_compiler():
 
 
 @pytest.mark.skipif(_latex_compiler() is None, reason="no LaTeX compiler installed")
-def test_template_with_entries_compiles(tmp_path):
-    """The Overleaf template plus generated entries must compile, awkward characters included."""
+@pytest.mark.parametrize("document", ["journal", "report"])
+def test_template_with_entries_compiles(tmp_path, document):
+    """The journal and a report must compile with generated entries, awkward characters included."""
     project = tmp_path / "project"
     shutil.copytree(TEMPLATE, project)
     journal.write_entry(make_run(tmp_path), project)
@@ -441,15 +465,18 @@ def test_template_with_entries_compiles(tmp_path):
         figure = plt.figure(figsize=(2, 1))
         figure.savefig(pdf)
         plt.close(figure)
-    with open(project / "journal.tex", "a") as file:
-        file.write("\\meeting{2026-01-01}{Ana, Bor}{Notes.}\n\\decision{Go on.}\n")
+    notes = "\\meeting{2026-01-01}{Ana, Bor}{Notes.}\n\\decision{Go on.}\n"
+    report = "\\expentry{001-toy}\n\\expentry{002-awkward_name}\n\\remark{Note.}\n\\question{Ana}{Why?}\n"
+    for name, extra in (("journal", notes), ("report", report)):
+        path = project / f"{name}.tex"
+        path.write_text(path.read_text().replace("\\end{document}", extra + "\\end{document}"))
 
     compiler = _latex_compiler()
     command = {
-        "tectonic": ["tectonic", "main.tex"],
-        "latexmk": ["latexmk", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
-        "pdflatex": ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
+        "tectonic": ["tectonic", f"{document}.tex"],
+        "latexmk": ["latexmk", "-pdf", "-interaction=nonstopmode", "-halt-on-error", f"{document}.tex"],
+        "pdflatex": ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", f"{document}.tex"],
     }[compiler]
     result = subprocess.run(command, cwd=project, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
-    assert (project / "main.pdf").stat().st_size > 1000
+    assert (project / f"{document}.pdf").stat().st_size > 1000

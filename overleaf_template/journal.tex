@@ -1,9 +1,22 @@
-% Journal: a dated log of experiments, meetings and decisions. Newest entries at the bottom.
+% Journal: bookkeeping for the project. A dated log of experiments, meetings and decisions,
+% newest at the bottom. This is its own document: open it in Overleaf and compile.
 %
-% Experiment entries are added here automatically, once per experiment. Fill in
-% \hypothesis{} and \conclusion{} by hand. The facts between them are generated and
-% refreshed on every export.
+% Experiment entries are added automatically, once per experiment, at the end of the
+% document. Fill in \hypothesis{} and \conclusion{} by hand. The facts between them
+% are generated and refreshed on every export.
 %
-% Write your own notes anywhere in this file:
+% Write your own notes anywhere in the document body:
 %   \meeting{2026-10-12}{Ana, Bor}{What we discussed.}
 %   \decision{What we decided.}
+\documentclass[11pt]{article}
+\usepackage[margin=2.5cm]{geometry}
+% All macros. This file is written by the code repository on every export.
+\usepackage{generated/macros}
+
+\title{Journal}
+\date{}
+
+\begin{document}
+\maketitle
+
+\end{document}

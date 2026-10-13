@@ -1,5 +1,7 @@
-# Secrets and per-machine settings
+# Secrets and per-machine settings, and copies such as .env.bak
 .env
+.env.*
+!.env.example
 
 # The clone of the Overleaf project (overleaf_template/ is the tracked source)
 overleaf/
@@ -10,7 +12,9 @@ overleaf.lock
 
 # Run outputs and data stay on the server
 runs/
+# Hydra's own folders: outputs/ is not used here, multirun/ appears when -m is tried
 outputs/
+multirun/
 wandb/
 data/
 

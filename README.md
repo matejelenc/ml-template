@@ -64,9 +64,15 @@ gets no tag and no journal entry. Without a launcher: `uv run python scripts/exp
 ### What a launch does
 
 - Refuses uncommitted changes (`--allow-dirty` overrides and is recorded).
-- Creates the annotated tag `exp/012-lora` on the current commit and pushes it. One tag is
-  one commit: after changing code, create the next experiment number.
+- Creates the annotated tag `exp/012-lora` on the current commit. One tag is one commit:
+  after changing code, create the next experiment number.
 - Creates the run folder, prints the job script and the submit command, and submits.
+- Pushes the tag once the job is submitted. If tmux or Slurm refuses the job, nothing ran:
+  the run folder is marked `failed` and a tag made by this launch is removed again, so the
+  corrected launch can use the same number.
+
+One run is one setting. Hydra's multirun (`-m`) is refused, because all its jobs would write
+to the same run folder: launch once per seed or value instead.
 
 Slurm settings live in `scripts/launch/servers/<profile>.sh`: `#SBATCH` lines, then setup
 commands such as `module load`. Override single flags with `--sbatch "--time=12:00:00"`.
@@ -229,10 +235,13 @@ SECRETS=WANDB_API_KEY,OVERLEAF_TOKEN,HF_TOKEN
 HF_TOKEN=...
 ```
 
-The values of the listed variables are replaced by `<redacted>` in everything the code
-writes or uploads: run folders, the printed config, W&B and the journal. Nothing is guessed
-from names, so a secret that is not listed is not redacted. Never type a secret into a
-config file or on the command line.
+The values of the listed variables are replaced by `<redacted>` in the config (printed,
+saved in the run folder and sent to W&B) and in `run.json`. Nothing is guessed from names,
+so a secret that is not listed is not redacted.
+
+That is all that is redacted. What your own code prints goes to `output.log` as it is, and
+the launcher prints the command and saves it in `job.sh` as it is. So never print a secret,
+and never type one into a config file or on the command line.
 
 ## Claude Code
 

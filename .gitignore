@@ -5,6 +5,9 @@
 overleaf/
 overleaf.lock
 
+# Personal Claude Code settings (.claude/settings.json is shared)
+.claude/settings.local.json
+
 # Run outputs and data stay on the server
 runs/
 outputs/

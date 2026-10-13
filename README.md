@@ -82,6 +82,7 @@ scripts/launch/               launchers, job wrapper, per-server settings
 src/expkit/                   the bookkeeping library (record, tracking, journal)
 tests/                        one folder per source folder, one file per module
 CONTRIBUTING.md               ways of working: how code is written here
+CLAUDE.md, .claude/           rules and settings for Claude Code (see below)
 overleaf_template/            skeletons copied into the Overleaf project by the setup
 overleaf/                     your clone of the Overleaf project (not in git)
 ```
@@ -232,6 +233,25 @@ The values of the listed variables are replaced by `<redacted>` in everything th
 writes or uploads: run folders, the printed config, W&B and the journal. Nothing is guessed
 from names, so a secret that is not listed is not redacted. Never type a secret into a
 config file or on the command line.
+
+## Claude Code
+
+The project carries its own setup for Claude Code, the same on every server:
+
+| File | What it does |
+|---|---|
+| `CLAUDE.md` | rules and conventions, read in every session. Add project knowledge in its last section |
+| `.claude/settings.json` | permissions and hooks, enforced by the program |
+| `.claude/skills/experiment/` | the steps of launching an experiment. Type `/experiment lr 0.01 on hpc-gpu`, or just ask for an experiment |
+| `.claude/hooks/check.sh` | runs `make check` when Claude finishes a turn in which it changed code, and hands a failure back to it once |
+
+The permissions: Claude cannot read `.env` or edit `overleaf/`. It always asks before a
+launcher (a `--dry-run` included), `git push`, `git tag`, `make journal` and `make setup`,
+even if you allowed such a command earlier. The checks (`make check`, `pytest`, `ruff`,
+`mypy`) run without asking. Patterns match the text of a command, so they catch the usual
+forms, not every possible one.
+
+Settings of your own go in `.claude/settings.local.json`, which is not committed.
 
 ## Never commit
 

@@ -80,7 +80,7 @@ def test_run_id_is_generated_without_the_launcher(tmp_path):
 
 def test_secret_on_the_command_line_is_not_printed_or_saved(tmp_path):
     env = {**os.environ, "RUNS_DIR": str(tmp_path), "WANDB_MODE": "disabled", "OVERLEAF_DIR": str(tmp_path / "no-overleaf"), "OVERLEAF_GIT_URL": "", "RUN_ID": "test-run",
-           "MY_API_KEY": "secret-value-123456"}
+           "SECRETS": "MY_API_KEY", "MY_API_KEY": "secret-value-123456"}
     result = subprocess.run(
         [sys.executable, "scripts/experiment.py", "train.steps=20", "+note=secret-value-123456"],
         cwd=REPO, env=env, capture_output=True, text=True,

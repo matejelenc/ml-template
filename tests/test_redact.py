@@ -1,49 +1,49 @@
 """Secrets must never reach a file that expkit writes."""
 
-import pytest
-
-from expkit.redact import REDACTED, is_secret_name, redact
+from expkit.redact import REDACTED, redact, secret_values
 
 
-@pytest.mark.parametrize(
-    "name", ["api_key", "WANDB_API_KEY", "apikey", "hf_token", "token", "OVERLEAF_TOKEN",
-             "db_password", "client_secret", "credentials"],
-)
-def test_secret_names(name):
-    assert is_secret_name(name)
-
-
-@pytest.mark.parametrize(
-    "name", ["max_tokens", "num_tokens", "tokenizer", "pad_token", "eos_token", "bos_token_id",
-             "lr", "key_dim", "monkey"],
-)
-def test_ordinary_names(name):
-    assert not is_secret_name(name)
-
-
-def test_value_under_secret_key_is_replaced():
-    config = {"model": {"hf_token": "abc", "max_tokens": 128}, "lr": 0.1}
-    assert redact(config) == {"model": {"hf_token": REDACTED, "max_tokens": 128}, "lr": 0.1}
-
-
-def test_empty_and_non_text_values_are_kept():
-    config = {"api_key": None, "password": "", "use_auth_token": True}
-    assert redact(config) == config
-
-
-def test_known_secret_is_replaced_under_any_key(monkeypatch):
+def test_listed_secret_is_replaced_wherever_it_appears(monkeypatch):
+    monkeypatch.setenv("SECRETS", "WANDB_API_KEY")
     monkeypatch.setenv("WANDB_API_KEY", "wandb-secret-123456")
     config = {"notes": "key is wandb-secret-123456!", "items": ["wandb-secret-123456", 3]}
     assert redact(config) == {"notes": f"key is {REDACTED}!", "items": [REDACTED, 3]}
 
 
-def test_short_environment_values_are_ignored(monkeypatch):
-    # A short value such as "1" would otherwise be cut out of unrelated text.
-    monkeypatch.setenv("SOME_TOKEN", "1")
-    assert redact({"note": "step 1 of 10"}) == {"note": "step 1 of 10"}
+def test_only_listed_variables_are_secrets(monkeypatch):
+    # Nothing is guessed from names: an unlisted token passes through.
+    monkeypatch.setenv("SECRETS", "WANDB_API_KEY")
+    monkeypatch.setenv("WANDB_API_KEY", "wandb-secret-123456")
+    monkeypatch.setenv("HF_TOKEN", "hf-abcdef")
+    config = {"hf_token": "hf-abcdef", "api_key": "typed-by-hand"}
+    assert redact(config) == config
 
 
-def test_input_is_not_changed():
-    config = {"api_key": "abc"}
+def test_spaces_and_several_names_in_the_list(monkeypatch):
+    monkeypatch.setenv("SECRETS", " WANDB_API_KEY , OVERLEAF_TOKEN,")
+    monkeypatch.setenv("WANDB_API_KEY", "wandb-secret")
+    monkeypatch.setenv("OVERLEAF_TOKEN", "wandb-secret-and-more")
+    # Longest first, so the longer secret is not left half visible.
+    assert secret_values() == ["wandb-secret-and-more", "wandb-secret"]
+    assert redact("x wandb-secret-and-more y") == f"x {REDACTED} y"
+
+
+def test_unset_and_empty_secrets_are_skipped(monkeypatch):
+    monkeypatch.setenv("SECRETS", "WANDB_API_KEY,NOT_SET")
+    monkeypatch.setenv("WANDB_API_KEY", "")
+    monkeypatch.delenv("NOT_SET", raising=False)
+    assert redact({"note": "text"}) == {"note": "text"}
+
+
+def test_no_list_means_nothing_is_redacted(monkeypatch):
+    monkeypatch.delenv("SECRETS", raising=False)
+    monkeypatch.setenv("WANDB_API_KEY", "wandb-secret-123456")
+    assert redact({"note": "wandb-secret-123456"}) == {"note": "wandb-secret-123456"}
+
+
+def test_input_is_not_changed(monkeypatch):
+    monkeypatch.setenv("SECRETS", "WANDB_API_KEY")
+    monkeypatch.setenv("WANDB_API_KEY", "wandb-secret-123456")
+    config = {"note": "wandb-secret-123456"}
     redact(config)
-    assert config == {"api_key": "abc"}
+    assert config == {"note": "wandb-secret-123456"}

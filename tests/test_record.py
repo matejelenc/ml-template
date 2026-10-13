@@ -178,9 +178,10 @@ def test_resolved_config_is_written_with_schema_version(tmp_path, repo):
 
 
 def test_secrets_reach_no_run_file(tmp_path, repo, monkeypatch):
+    monkeypatch.setenv("SECRETS", "WANDB_API_KEY")
     monkeypatch.setenv("WANDB_API_KEY", "wandb-secret-123456")
     monkeypatch.setattr("sys.argv", ["experiment.py", "note=wandb-secret-123456"])
-    cfg = make_cfg(tmp_path, hf_token="hf-abcdef", note="uses wandb-secret-123456")
+    cfg = make_cfg(tmp_path, note="uses wandb-secret-123456")
     run = record.start(cfg)
     run.update(wandb_url="https://wandb.ai/x?key=wandb-secret-123456")
     run.finish()
@@ -188,7 +189,6 @@ def test_secrets_reach_no_run_file(tmp_path, repo, monkeypatch):
         if path.is_file():
             text = path.read_text()
             assert "wandb-secret-123456" not in text, path.name
-            assert "hf-abcdef" not in text, path.name
     assert "<redacted>" in (run.dir / "config.resolved.yaml").read_text()
 
 

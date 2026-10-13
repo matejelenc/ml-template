@@ -67,7 +67,9 @@ def test_start_passes_identity_and_records_the_url(tmp_path, fake_wandb):
     assert wandb_url(run) == FakeWandbRun.url
 
 
-def test_config_sent_to_wandb_is_redacted(tmp_path, fake_wandb):
+def test_config_sent_to_wandb_is_redacted(tmp_path, fake_wandb, monkeypatch):
+    monkeypatch.setenv("SECRETS", "HF_TOKEN")
+    monkeypatch.setenv("HF_TOKEN", "hf-abcdef")
     cfg = make_cfg(tmp_path, hf_token="hf-abcdef")
     tracking.start(cfg, record.start(cfg))
     assert fake_wandb.init_args["config"]["hf_token"] == "<redacted>"

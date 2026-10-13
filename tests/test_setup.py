@@ -26,6 +26,7 @@ def project(tmp_path):
     project = tmp_path / "my-project"
     for folder in ("scripts", "overleaf_template"):
         shutil.copytree(REPO / folder, project / folder, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(REPO / ".env.example", project / ".env.example")
     return project
 
 
@@ -54,22 +55,29 @@ def run_setup(project, answers):
 
 
 def env_lines(project):
-    return (project / ".env").read_text().splitlines()
+    """The NAME=value lines of .env, without comments and blank lines."""
+    lines = (project / ".env").read_text().splitlines()
+    return [line for line in lines if line and not line.startswith("#")]
 
 
 def test_first_setup_writes_env_and_fills_the_overleaf_project(project, overleaf):
     result = run_setup(project, ["wandb-key-123456", "", f"git clone {overleaf} folder", TOKEN,
                                  "/big/runs", "", "hpc-gpu"])
     assert result.returncode == 0, result.stderr
+    # Same order and sections as .env.example: settings first, secrets last.
     assert env_lines(project) == [
-        "WANDB_API_KEY=wandb-key-123456",
-        "WANDB_PROJECT=my-project",  # default: the folder name
-        f"OVERLEAF_GIT_URL={overleaf}",  # "git clone" and the folder name are stripped
-        f"OVERLEAF_TOKEN={TOKEN}",
         "RUNS_DIR=/big/runs",
         "DATA_DIR=",
         "LAUNCH_PROFILE=hpc-gpu",
+        "WANDB_PROJECT=my-project",  # default: the folder name
+        "WANDB_ENTITY=",
+        "WANDB_MODE=",
+        f"OVERLEAF_GIT_URL={overleaf}",  # "git clone" and the folder name are stripped
+        "SECRETS=WANDB_API_KEY,OVERLEAF_TOKEN",
+        "WANDB_API_KEY=wandb-key-123456",
+        f"OVERLEAF_TOKEN={TOKEN}",
     ]
+    assert "# ===== Secrets =====" in (project / ".env").read_text()
     assert stat.S_IMODE((project / ".env").stat().st_mode) == 0o600
 
     files = git(overleaf, "ls-tree", "-r", "--name-only", "main").splitlines()
@@ -115,9 +123,15 @@ def test_other_lines_in_env_are_kept(project, overleaf):
     (project / ".env").write_text("# my comment\nMY_OWN_SETTING=1\nWANDB_PROJECT=old\n")
     result = run_setup(project, ["k" * 16, "new", "", "", "", "", ""])
     assert result.returncode == 0, result.stderr
-    lines = env_lines(project)
+    lines = (project / ".env").read_text().splitlines()
     assert lines[:3] == ["# my comment", "MY_OWN_SETTING=1", "WANDB_PROJECT=new"]
     assert stat.S_IMODE((project / ".env").stat().st_mode) == 0o600
+
+
+def test_secrets_added_by_the_user_stay_in_the_list(project):
+    (project / ".env").write_text("SECRETS=HF_TOKEN\nHF_TOKEN=hf-abcdef\n")
+    run_setup(project, ["k" * 16, "", "", "", "", "", ""])
+    assert env_lines(project)[0] == "SECRETS=HF_TOKEN,WANDB_API_KEY,OVERLEAF_TOKEN"
 
 
 def test_overleaf_can_be_skipped(project):

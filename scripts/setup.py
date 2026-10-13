@@ -2,7 +2,7 @@
 
     uv run python scripts/setup.py
 
-It asks for the settings, writes them to .env (readable only by you), clones the Overleaf
+It asks for the settings, writes them to .env (a copy of .env.example, readable only by you), clones the Overleaf
 project into overleaf/ and adds the journal and report skeletons to it if they are missing.
 Press Enter to keep a value shown in [brackets]. README.md lists the same steps by hand.
 """
@@ -18,6 +18,7 @@ from expkit import journal
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / ".env"
+ENV_EXAMPLE = ROOT / ".env.example"
 TEMPLATE_DIR = ROOT / "overleaf_template"
 
 # (name in .env, question, is it a secret)
@@ -51,9 +52,13 @@ def read_env(path: Path) -> dict:
     return values
 
 
-def write_env(path: Path, values: dict) -> None:
-    """Update .env: change the given keys, keep every other line, permissions 600."""
-    lines = path.read_text().splitlines() if path.is_file() else []
+def write_env(path: Path, values: dict, template: Path = ENV_EXAMPLE) -> None:
+    """Update .env: change the given keys, keep every other line, permissions 600.
+
+    A new .env starts as a copy of the template, so it has the same sections and comments.
+    """
+    source = path if path.is_file() else template
+    lines = source.read_text().splitlines() if source.is_file() else []
     remaining = dict(values)
     for index, line in enumerate(lines):
         name = line.split("=", 1)[0].strip()
@@ -66,6 +71,13 @@ def write_env(path: Path, values: dict) -> None:
     with os.fdopen(descriptor, "w") as file:
         file.write("\n".join(lines) + "\n")
     os.chmod(path, 0o600)
+
+
+def secrets_list(current: str) -> str:
+    """The SECRETS line for .env: the names already listed plus the secrets asked for here."""
+    names = [name.strip() for name in current.split(",") if name.strip()]
+    names += [name for name, _, secret in QUESTIONS if secret and name not in names]
+    return ",".join(names)
 
 
 def ask(question: str, current: str, secret: bool) -> str:
@@ -127,7 +139,8 @@ def main() -> int:
     print(f"Setting up {ROOT}\n")
     current = read_env(ENV_FILE)
     defaults = {"WANDB_PROJECT": ROOT.name}
-    values = {}
+    # Names of the variables that expkit.redact removes from everything it writes.
+    values = {"SECRETS": secrets_list(current.get("SECRETS", ""))}
     for name, question, secret in QUESTIONS:
         values[name] = ask(question, current.get(name) or defaults.get(name, ""), secret)
     values["OVERLEAF_GIT_URL"] = clean_overleaf_url(values["OVERLEAF_GIT_URL"])

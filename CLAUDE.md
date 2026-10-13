@@ -34,6 +34,8 @@ Safe without asking: `--dry-run` launches, `make test`, `make status`, and local
   Every JSON and YAML file there carries `schema_version`; raise `SCHEMA_VERSION` in
   `src/expkit/record.py` when a field changes meaning.
 - Per-server paths and secrets come from `.env`, never from committed config.
+- Every secret's variable name is listed in `SECRETS` in `.env` (and `.env.example`). Only
+  listed variables are redacted; nothing is guessed from names.
 - Runs without `+experiment=...` are scratch runs: no tag, no journal entry.
 
 ## Code

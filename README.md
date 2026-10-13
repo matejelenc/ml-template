@@ -129,6 +129,20 @@ After an offline run: `uv run wandb sync <run folder>/wandb/offline-run-*`.
 - Reports: copy `report.tex`, write it by hand. `\remark{...}`, `\question{Name}{...}` and
   `\expentry{012-lora}` (the generated facts of an experiment) are available.
 
+## Secrets
+
+Keys, tokens and passwords live only in `.env`. List the name of each one in `SECRETS`:
+
+```
+SECRETS=WANDB_API_KEY,OVERLEAF_TOKEN,HF_TOKEN
+HF_TOKEN=...
+```
+
+The values of the listed variables are replaced by `<redacted>` in everything the code
+writes or uploads: run folders, the printed config, W&B and the journal. Nothing is guessed
+from names, so a secret that is not listed is not redacted. Never type a secret into a
+config file or on the command line.
+
 ## Never commit
 
 `.env`, `overleaf/`, `runs/`, `wandb/`, `data/`, and model weights. `.gitignore` covers them.

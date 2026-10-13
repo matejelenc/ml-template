@@ -116,7 +116,7 @@ def test_wrapper_records_success_and_output(tmp_path):
     status = read_json(tmp_path / "run/status.json")
     assert status == {"schema_version": 1, "state": "done", "heartbeat": status["heartbeat"],
                       "exit_code": 0}
-    assert (tmp_path / "run/stdout.log").read_text() == "out\nerr\n"
+    assert (tmp_path / "run/output.log").read_text() == "out\nerr\n"
 
 
 def test_wrapper_records_failure_with_exit_code(tmp_path):
@@ -151,10 +151,10 @@ def test_wrapper_records_cancellation_and_stops_the_job(tmp_path, signal_number)
     process = subprocess.Popen(["bash", str(WRAPPER), str(run_dir), *job],
                                env={**os.environ, "HEARTBEAT_SECONDS": "1"})
     deadline = time.time() + 10
-    while not (run_dir / "stdout.log").is_file() or not (run_dir / "stdout.log").read_text().strip():
+    while not (run_dir / "output.log").is_file() or not (run_dir / "output.log").read_text().strip():
         assert time.time() < deadline, "job did not start"
         time.sleep(0.05)
-    job_pid = int((run_dir / "stdout.log").read_text().split()[0])
+    job_pid = int((run_dir / "output.log").read_text().split()[0])
     assert read_json(run_dir / "status.json")["state"] == "running"
 
     process.send_signal(signal_number)
@@ -333,7 +333,7 @@ def test_tmux_launch_end_to_end(project):
     assert info["run_id"] == run_dir.name
     assert info["git"]["tag"] == "exp/001-toy" and info["git"]["dirty"] is False
     assert info["launch"]["scheduler"] == "tmux" and info["launch"]["job_id"] == run_dir.name
-    assert "final loss" in (run_dir / "stdout.log").read_text()
+    assert "final loss" in (run_dir / "output.log").read_text()
     assert (run_dir / "summary.json").is_file() and (run_dir / "job.sh").is_file()
 
 
@@ -344,7 +344,7 @@ def test_failed_job_is_recorded(project):
     run_dir = only_run(project)
     status = read_json(run_dir / "status.json")
     assert status["state"] == "failed" and status["exit_code"] != 0
-    assert "not-a-number" in (run_dir / "stdout.log").read_text()
+    assert "not-a-number" in (run_dir / "output.log").read_text()
 
 
 def test_tmux_profile_setup_lines_run_before_the_job(project):
@@ -353,7 +353,7 @@ def test_tmux_profile_setup_lines_run_before_the_job(project):
     git(project, "commit", "-q", "-m", "profile")
     result = launch(project, "tmux", "--profile", "mine", "bash", "-c", "echo value=$FROM_PROFILE")
     assert result.returncode == 0, result.stderr
-    assert (only_run(project, "scratch") / "stdout.log").read_text() == "value=hello\n"
+    assert (only_run(project, "scratch") / "output.log").read_text() == "value=hello\n"
 
 
 def test_runs_dir_comes_from_dot_env(project):
@@ -412,7 +412,7 @@ def test_slurm_job_end_to_end(project):
     info = read_json(run_dir / "run.json")
     assert info["launch"]["scheduler"] == "slurm" and info["launch"]["job_id"] == "4242"
     assert info["git"]["tag"] == "exp/001-toy"
-    assert "final loss" in (run_dir / "stdout.log").read_text()
+    assert "final loss" in (run_dir / "output.log").read_text()
 
 
 def test_job_runs_even_if_the_library_is_broken(project):

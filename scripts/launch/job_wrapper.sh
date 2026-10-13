@@ -9,7 +9,7 @@
 # "running" with an old heartbeat was killed without warning: `make status` shows it as lost.
 #
 # This file depends on nothing but bash, on purpose: jobs must run and be recorded even if
-# the Python library is broken. All output of the command goes to <run_dir>/stdout.log.
+# the Python library is broken. All output of the command goes to <run_dir>/output.log.
 
 set -u
 SCHEMA_VERSION=1
@@ -38,7 +38,7 @@ fi
 RUN_DIR="$1"
 shift
 mkdir -p "$RUN_DIR"
-LOG="$RUN_DIR/stdout.log"
+LOG="$RUN_DIR/output.log"
 
 write_status running null
 

@@ -6,7 +6,7 @@ A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
     config.yaml            the final merged config, secrets redacted
     monitor/               numbers logged during training, one JSON object per line:
                            {"step": 100, "loss": 0.42}. Everything is in monitor/main.jsonl
-                           unless a series is named: run.log(..., series="model_a/fold_0")
+                           unless a series is named: run.monitor(..., series="model_a/fold_0")
                            writes monitor/model_a/fold_0.jsonl
     summary.json           final metrics, weight files and journal files, written at the end
     journal/               the figures and tables that go into the Overleaf journal (small,
@@ -16,13 +16,13 @@ A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
     weights/               model weights (stay on the server)
     wandb/                 W&B's own files, only when W&B tracking is on
 
-status.json, stdout.log and job.sh are written by the launcher, not here.
+status.json, output.log and job.sh are written by the launcher, not here.
 
 Use it from training code like this:
 
     run = record.start(cfg)
-    run.log(step=100, loss=0.42)
-    run.log(step=100, series="fold_0", loss=0.42)   # several models or folds in one run
+    run.monitor(step=100, loss=0.42)
+    run.monitor(step=100, series="fold_0", loss=0.42)   # several models or folds in one run
     run.finish(metrics={"loss": 0.01})
 """
 
@@ -160,11 +160,11 @@ class Run:
         # Metric names that W&B has been told the step counter of.
         self._wandb_metrics: set = set()
 
-    def log(self, step: int, series: str = MAIN_SERIES, **metrics: Any) -> None:
+    def monitor(self, step: int, series: str = MAIN_SERIES, **metrics: Any) -> None:
         """Append one line of numbers to monitor/<series>.jsonl and send them to W&B.
 
-            run.log(step=100, loss=0.42)                      # monitor/main.jsonl
-            run.log(step=100, series="model_a/fold_0", loss=0.42)  # monitor/model_a/fold_0.jsonl
+            run.monitor(step=100, loss=0.42)                      # monitor/main.jsonl
+            run.monitor(step=100, series="model_a/fold_0", loss=0.42)  # monitor/model_a/fold_0.jsonl
 
         Each series counts its own steps, so a second model or fold can start again at 0.
         In W&B a series shows up as a name prefix: "model_a/fold_0/loss".

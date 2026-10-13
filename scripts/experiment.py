@@ -10,15 +10,14 @@ import json
 import random
 
 import hydra
-from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
 from expkit import journal, record, tracking
-from expkit.config import SCRATCH, register_resolvers
+from expkit.config import SCRATCH, load_env, register_resolvers
 from expkit.redact import redact
 
 # Read .env before Hydra builds the config, because the config uses RUNS_DIR and DATA_DIR.
-load_dotenv()
+load_env()
 register_resolvers()
 
 
@@ -35,7 +34,7 @@ def train(cfg: DictConfig, run: record.Run) -> float:
         b -= cfg.train.lr * 2 * error
         if step % cfg.train.log_every == 0:
             print(f"step {step:4d}  loss {loss:.6f}")
-            run.log(step=step, loss=loss)
+            run.monitor(step=step, loss=loss)
     plot_loss(run)
     # Weights go into the run folder. A real project would call torch.save here.
     (run.weights_dir / "model.json").write_text(json.dumps({"w": w, "b": b}))

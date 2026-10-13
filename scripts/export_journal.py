@@ -10,9 +10,8 @@ Exit code 0 on success, 1 on failure.
 import argparse
 import sys
 
-from dotenv import load_dotenv
-
 from expkit import journal
+from expkit.config import load_env
 
 
 def main() -> int:
@@ -22,7 +21,7 @@ def main() -> int:
     parser.add_argument("--out", help="write to this folder instead of pushing to Overleaf")
     args = parser.parse_args()
 
-    load_dotenv()
+    load_env()
     try:
         run_dir = journal.find_run(args.experiment, args.run)
         print(f"run: {run_dir}")

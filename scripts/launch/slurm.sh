@@ -23,5 +23,5 @@ echo "submit: ${submit[*]}"
 
 job_id="$("${submit[@]}")"
 echo "submitted Slurm job $job_id"
-echo "  watch:  tail -f $RUN_DIR/stdout.log     (or: squeue -j $job_id)"
+echo "  watch:  tail -f $RUN_DIR/output.log     (or: squeue -j $job_id)"
 echo "  cancel: scancel $job_id"

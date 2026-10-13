@@ -53,7 +53,7 @@ On every further server: `git clone`, `uv sync`, `make setup`.
    scripts/launch/slurm.sh --profile hpc-gpu scripts/experiment.py +experiment=012-lora
    ```
    Add `--dry-run` to see what would happen without doing it.
-4. Watch it in W&B, or with `make status` and `tail -f <run folder>/stdout.log`.
+4. Watch it in W&B, or with `make status` and `tail -f <run folder>/output.log`.
 5. When it finishes, its entry is in the Overleaf journal. Open `journal.tex` there and
    fill in `\hypothesis{}` and `\conclusion{}`.
 
@@ -92,7 +92,7 @@ A run folder is `$RUNS_DIR/<experiment>/<run id>/`:
 | `config.yaml` | the final config, secrets redacted |
 | `monitor/` | numbers logged during training, one JSON object per step; the local copy of what W&B gets. `main.jsonl`, plus one file per named series |
 | `summary.json` | written at the end: final metrics, duration, weight files with size and SHA-256, journal files |
-| `stdout.log`, `job.sh` | output and the exact job script |
+| `output.log`, `job.sh` | everything the job printed, errors included, and the exact job script |
 | `journal/` | the figures you select for the Overleaf journal; every PDF, PNG or JPG here is exported, subfolders included |
 | `eval/` | everything else from evaluation (predictions, statistics, further plots); organized as you like, never read by the code |
 | `weights/` | model weights; they stay on the server |
@@ -107,19 +107,27 @@ In your own script, the bookkeeping is four lines (see `scripts/experiment.py`):
 ```python
 run = record.start(cfg)             # run.json, config.yaml
 tracking.start(cfg, run)            # W&B
-run.log(step=100, loss=0.42)        # monitor/main.jsonl and W&B
+run.monitor(step=100, loss=0.42)        # monitor/main.jsonl and W&B
 run.finish(metrics={"loss": 0.01})  # summary.json
 ```
 
 An experiment that trains several models or folds in one run names a series per model:
 
 ```python
-run.log(step=100, series="model_a/fold_0", loss=0.42)   # monitor/model_a/fold_0.jsonl
+run.monitor(step=100, series="model_a/fold_0", loss=0.42)   # monitor/model_a/fold_0.jsonl
 ```
 
 Each series counts its own steps and appears in W&B as `model_a/fold_0/loss`.
 `run.finish(metrics=...)` is for a handful of headline numbers. Larger tables belong in
 `journal/` or `eval/` as files.
+
+### Text output
+
+There is no logging method of its own. Use `print` or Python's `logging` as you like:
+both launchers save all output of the job, tracebacks and library warnings included, in
+`output.log`. Under Slurm, `slurm.log` holds what was printed before the job started, for
+example a failed `module load`. A bare `uv run python scripts/...` keeps no log file and
+is meant for quick debugging.
 
 ## Commands
 

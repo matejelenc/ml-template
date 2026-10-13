@@ -1,7 +1,7 @@
 """Weights & Biases (W&B) tracking.
 
     run = record.start(cfg)
-    tracking.start(cfg, run)   # from here on, run.log(...) also sends to W&B
+    tracking.start(cfg, run)   # from here on, run.monitor(...) also sends to W&B
 
 Modes, set with wandb.mode in the config or WANDB_MODE in the environment:
     online     live curves at wandb.ai

@@ -211,8 +211,8 @@ class FakeTensor:
 
 def test_log_appends_json_lines(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
-    run.log(step=1, loss=0.5)
-    run.log(step=2, loss=FakeTensor(), acc=0.9)
+    run.monitor(step=1, loss=0.5)
+    run.monitor(step=2, loss=FakeTensor(), acc=0.9)
     lines = [json.loads(line) for line in (run.monitor_dir / "main.jsonl").read_text().splitlines()]
     assert lines == [{"step": 1, "loss": 0.5}, {"step": 2, "loss": 0.25, "acc": 0.9}]
 
@@ -221,16 +221,16 @@ def test_metrics_can_be_appended_without_the_library(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     with open(run.monitor_dir / "main.jsonl", "a") as file:
         file.write(json.dumps({"step": 1, "loss": 0.5}) + "\n")
-    run.log(step=2, loss=0.4)
+    run.monitor(step=2, loss=0.4)
     assert len((run.monitor_dir / "main.jsonl").read_text().splitlines()) == 2
 
 
 def test_each_series_gets_its_own_file(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
-    run.log(step=0, loss=1.0)
-    run.log(step=0, series="model_a/fold_0", loss=0.9)
-    run.log(step=0, series="model_a/fold_1", loss=0.8)  # steps may start again
-    run.log(step=1, series="model_a/fold_1", loss=0.7)
+    run.monitor(step=0, loss=1.0)
+    run.monitor(step=0, series="model_a/fold_0", loss=0.9)
+    run.monitor(step=0, series="model_a/fold_1", loss=0.8)  # steps may start again
+    run.monitor(step=1, series="model_a/fold_1", loss=0.7)
     files = sorted(str(p.relative_to(run.monitor_dir)) for p in run.monitor_dir.rglob("*.jsonl"))
     assert files == ["main.jsonl", "model_a/fold_0.jsonl", "model_a/fold_1.jsonl"]
     assert len((run.monitor_dir / "model_a/fold_1.jsonl").read_text().splitlines()) == 2
@@ -240,7 +240,7 @@ def test_each_series_gets_its_own_file(tmp_path, repo):
 def test_bad_series_names_are_refused(tmp_path, repo, series):
     run = record.start(make_cfg(tmp_path))
     with pytest.raises(ValueError):
-        run.log(step=0, series=series, loss=1.0)
+        run.monitor(step=0, series=series, loss=1.0)
 
 
 def test_summary_lists_weights_and_journal_files(tmp_path, repo):

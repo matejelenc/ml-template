@@ -17,5 +17,5 @@ echo "submit: tmux new-session -d -s $RUN_ID bash $JOB_SCRIPT"
 
 tmux new-session -d -s "$RUN_ID" "bash $(printf '%q' "$JOB_SCRIPT")"
 echo "started tmux session $RUN_ID"
-echo "  watch:  tmux attach -t $RUN_ID     (or: tail -f $RUN_DIR/stdout.log)"
+echo "  watch:  tmux attach -t $RUN_ID     (or: tail -f $RUN_DIR/output.log)"
 echo "  cancel: tmux kill-session -t $RUN_ID"

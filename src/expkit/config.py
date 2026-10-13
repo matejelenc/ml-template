@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Union
 
+from dotenv import dotenv_values, find_dotenv
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 
@@ -41,6 +43,18 @@ def _experiment_id() -> str:
     """
     choice = HydraConfig.get().runtime.choices.get("experiment")
     return str(choice).split("/")[-1] if choice else SCRATCH
+
+
+def load_env(path: Union[str, Path, None] = None) -> None:
+    """Read .env into the environment. Call it first, before the config is built.
+
+    A variable that is already set in the shell wins over .env. An empty line such as
+    "WANDB_MODE=" counts as unset and is skipped: libraries such as W&B read their variables
+    themselves and fail on an empty value.
+    """
+    for name, value in dotenv_values(path or find_dotenv(usecwd=True)).items():
+        if value and name not in os.environ:
+            os.environ[name] = value
 
 
 def _env(name: str, default: Any = None) -> Any:

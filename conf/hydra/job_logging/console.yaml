@@ -1,5 +1,5 @@
 # Python logging for jobs: print to the terminal only.
-# The launcher saves the terminal output as stdout.log, so Hydra needs no log file of its own.
+# The launcher saves the terminal output as output.log, so Hydra needs no log file of its own.
 version: 1
 formatters:
   simple:

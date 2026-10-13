@@ -98,8 +98,8 @@ give it a name by making it a function.
 ## Tests
 
 - Tests mirror the code: `src/<package>/<module>.py` is tested in
-  `tests/<package>/test_<module>.py`, and `scripts/<name>.py` in
-  `tests/scripts/test_<name>.py`. Each test file starts with a one-line docstring.
+  `tests/<package>/test_<module>.py`, `scripts/<name>.py` in `tests/scripts/test_<name>.py`,
+  and the config in `tests/conf/`. Each test file starts with a docstring.
 - The name of a test says what must hold: `test_a_crashed_run_keeps_its_run_json`.
 - Test what a function promises, not how it does it. A few tests that would catch a real
   mistake are worth more than many that restate the code.

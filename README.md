@@ -63,7 +63,8 @@ gets no tag and no journal entry. Without a launcher: `uv run python scripts/exp
 
 ### What a launch does
 
-- Refuses uncommitted changes (`--allow-dirty` overrides and is recorded).
+- Refuses uncommitted changes (`--allow-dirty` overrides and is recorded). A scratch run
+  is not checked.
 - Creates the annotated tag `exp/012-lora` on the current commit. One tag is one commit:
   after changing code, create the next experiment number.
 - Creates the run folder, prints the job script and the submit command, and submits.
@@ -153,8 +154,13 @@ is meant for quick debugging.
 | `make docs` | build the reference pages of `src/` from the docstrings into `docs/api/` |
 
 The tests mirror the code: `src/expkit/record.py` is tested in `tests/expkit/test_record.py`,
-`scripts/setup.py` in `tests/scripts/test_setup.py`. Tests for your own package go in
-`tests/<package>/`. Run one part with `uv run pytest tests/<package>`.
+`scripts/setup.py` in `tests/scripts/test_setup.py`, `conf/` in `tests/conf/`. Tests for your
+own package go in `tests/<package>/`. Run one part with `uv run pytest tests/<package>`.
+
+Only `tests/scripts/test_experiment.py` depends on the example: delete it together with
+`scripts/experiment.py`. All other tests run a stand-in script from `tests/fixtures/`, so
+they keep passing when you replace the example, its experiment file and the `train`
+settings with your own.
 
 How to change the code (type hints, docstrings, tests, commits) is in
 [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -173,8 +179,8 @@ After an offline run: `uv run wandb sync <run folder>/wandb/offline-run-*`.
   ```
   The template ships one style, `default`. To make your own, copy
   `src/expkit/templates/styles/default.sty` to a new name in the same folder, change it, and
-  use the new name as the option. A style defines seven colours and seven commands, listed
-  at the end of `macros.sty`; the macros you write in the documents stay the same. The next
+  use the new name as the option. A style defines the colours and the commands listed at
+  the end of `macros.sty`; the macros you write in the documents stay the same. The next
   export copies the new file to Overleaf.
 - The code writes only `generated/` and adds one stub per run to `journal.tex`.
   Everything else is yours.
@@ -256,8 +262,8 @@ The project carries its own setup for Claude Code, the same on every server:
 | `.claude/hooks/check.sh` | runs `make check` when Claude finishes a turn in which it changed code, and hands a failure back to it once |
 
 The permissions: Claude cannot read `.env` or edit `overleaf/`. It always asks before a
-launcher (a `--dry-run` included), `git push`, `git tag`, `make journal` and `make setup`,
-even if you allowed such a command earlier. The checks (`make check`, `pytest`, `ruff`,
+launcher (a `--dry-run` included), `git push`, `git tag`, `make journal` and `make setup`
+(and the two scripts behind them), even if you allowed such a command earlier. The checks (`make check`, `pytest`, `ruff`,
 `mypy`) run without asking. Patterns match the text of a command, so they catch the usual
 forms, not every possible one.
 

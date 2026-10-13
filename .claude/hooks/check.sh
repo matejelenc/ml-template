@@ -16,9 +16,13 @@ marker="$git_dir/claude-changed-code"
 event="$(cat)"
 
 if [ "${1:-}" = mark ]; then
-    # Only files that `make check` looks at. Editing the README costs no test run.
-    code='/(src|scripts|tests|conf)/[^"]*|/pyproject\.toml|/Makefile'
-    grep -Eq "\"file_path\": *\"[^\"]*($code)\"" <<<"$event" && touch "$marker"
+    # Only files of this project that `make check` looks at. Editing the README costs no
+    # test run, and neither does a file in another folder.
+    file="$(sed -nE 's/.*"file_path": *"([^"]*)".*/\1/p' <<<"$event" | head -n 1)"
+    case "$file" in
+        "$PWD"/src/*|"$PWD"/scripts/*|"$PWD"/tests/*|"$PWD"/conf/*|"$PWD"/pyproject.toml|"$PWD"/Makefile)
+            touch "$marker" ;;
+    esac
     exit 0
 fi
 

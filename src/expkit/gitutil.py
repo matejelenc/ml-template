@@ -1,4 +1,4 @@
-"""Git helpers. Every function returns None instead of raising when git is unavailable."""
+"""Git helpers. Nothing here raises when git is unavailable: the values are None instead."""
 
 import re
 import subprocess

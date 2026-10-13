@@ -5,7 +5,8 @@
 It asks for the settings, writes them to .env (a copy of .env.example, readable only by
 you), clones the Overleaf project into overleaf/ and adds the journal and report skeletons
 to it if they are missing.
-Press Enter to keep a value shown in [brackets]. README.md lists the same steps by hand.
+Press Enter to keep a value shown in [brackets]. To remove a value, edit .env by hand.
+README.md lists the same steps by hand.
 """
 
 import getpass
@@ -29,15 +30,15 @@ QUESTIONS = [
     ("WANDB_PROJECT", "W&B project name", False),
     (
         "OVERLEAF_GIT_URL",
-        "Overleaf git URL (Menu > Git in the Overleaf project; empty to skip Overleaf)",
+        "Overleaf git URL (Menu > Git in the Overleaf project; leave empty to skip Overleaf)",
         False,
     ),
     ("OVERLEAF_TOKEN", "Overleaf git token (Account settings > Git integration)", True),
-    ("RUNS_DIR", "Folder for run outputs on this machine (empty for runs/ in the repo)", False),
-    ("DATA_DIR", "Folder with datasets on this machine (empty for data/ in the repo)", False),
+    ("RUNS_DIR", "Folder for run outputs on this machine (default: runs/ in the repo)", False),
+    ("DATA_DIR", "Folder with datasets on this machine (default: data/ in the repo)", False),
     (
         "LAUNCH_PROFILE",
-        "Default launcher settings, a file name in scripts/launch/servers/ without .sh (empty for none)",
+        "Default launcher settings, a file name in scripts/launch/servers/ without .sh (default: none)",
         False,
     ),
 ]

@@ -20,7 +20,9 @@
       "Bash(git push *)",
       "Bash(git tag *)",
       "Bash(make journal*)",
-      "Bash(make setup*)"
+      "Bash(make setup*)",
+      "Bash(*scripts/export_journal.py*)",
+      "Bash(*scripts/setup.py*)"
     ],
     "deny": [
       "Read(./.env)",

@@ -71,8 +71,9 @@ def _env(name: str, default: Any = None) -> Any:
 def env_path(name: str, default: str) -> str:
     """A folder named by an environment variable, as an absolute path.
 
-    A relative folder is relative to the top folder of the repository, wherever the command
-    is run from. The launchers (scripts/launch/common.sh) follow the same rule.
+    A relative folder is relative to the top folder of the repository, from whichever of
+    its folders the command is run. Outside a repository it is relative to the current
+    folder. The launchers (scripts/launch/common.sh) follow the same rule.
 
     Args:
         name: Name of the environment variable, e.g. "RUNS_DIR".

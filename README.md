@@ -79,6 +79,7 @@ conf/experiment/              one file per experiment, overrides only (NNN-slug.
 scripts/experiment.py         example entry point: copy it for your own scripts
 scripts/launch/               launchers, job wrapper, per-server settings
 src/expkit/                   the bookkeeping library (record, tracking, journal)
+tests/                        one folder per source folder, one file per module
 overleaf_template/            skeletons copied into the Overleaf project by the setup
 overleaf/                     your clone of the Overleaf project (not in git)
 ```
@@ -138,6 +139,10 @@ is meant for quick debugging.
 | `make journal EXP=012-lora` | push the journal entry again |
 | `make journal EXP=012-lora OUT=folder` | write the entry to a folder, to upload by hand |
 | `make test` | run the tests |
+
+The tests mirror the code: `src/expkit/record.py` is tested in `tests/expkit/test_record.py`,
+`scripts/setup.py` in `tests/scripts/test_setup.py`. Tests for your own package go in
+`tests/<package>/`. Run one part with `uv run pytest tests/<package>`.
 
 Useful overrides: `wandb.mode=disabled` or `offline`, `journal.export=false`.
 After an offline run: `uv run wandb sync <run folder>/wandb/offline-run-*`.

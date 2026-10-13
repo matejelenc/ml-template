@@ -15,7 +15,7 @@ from omegaconf import OmegaConf
 import expkit
 from expkit import journal, record
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 TEMPLATE = REPO / "overleaf_template"
 
 

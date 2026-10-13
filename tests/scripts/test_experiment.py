@@ -1,4 +1,4 @@
-"""Smoke tests for the Hydra config: run the toy experiment as a user would."""
+"""scripts/experiment.py and the Hydra config: run the toy experiment as a user would."""
 
 import os
 import re
@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 
 def run_experiment(tmp_path, *args, run_id="test-run"):
@@ -104,18 +104,3 @@ def test_empty_variables_in_env_count_as_unset(tmp_path):
     assert "data_dir: data" in result.stdout
     assert "entity: null" in result.stdout
     assert "project: ml-template" in result.stdout
-
-
-def test_load_env_skips_empty_values_and_keeps_the_shell(tmp_path, monkeypatch):
-    from expkit.config import load_env
-
-    env_file = tmp_path / ".env"
-    env_file.write_text("WANDB_MODE=\nFROM_FILE=abc\nFROM_SHELL=file\n")
-    for name in ("WANDB_MODE", "FROM_FILE"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("FROM_SHELL", "shell")
-    load_env(env_file)
-    # An empty WANDB_MODE in the environment makes the W&B library fail at start.
-    assert "WANDB_MODE" not in os.environ
-    assert os.environ["FROM_FILE"] == "abc" and os.environ["FROM_SHELL"] == "shell"
-    monkeypatch.delenv("FROM_FILE")

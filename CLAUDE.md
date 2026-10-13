@@ -45,6 +45,9 @@ Safe without asking: `--dry-run` launches, `make test`, `make status`, and local
 - Supported: Python 3.9+ and Hydra 1.2+. Check both before finishing a change:
   `make test` and
   `uv run --isolated --python 3.9 --with 'hydra-core==1.2.0' pytest -q`
+- Tests mirror the code: `src/<package>/<module>.py` is tested in
+  `tests/<package>/test_<module>.py`, and `scripts/<name>.py` in `tests/scripts/test_<name>.py`.
+  Each test file starts with a one-line docstring saying what it covers.
 - `scripts/launch/job_wrapper.sh` must stay independent of Python and `expkit`.
 - The journal export and W&B must never make a job fail.
 - LaTeX layout lives only in `src/expkit/templates/macros.sty`; generated entries contain

@@ -27,3 +27,5 @@ packages = ["src/expkit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Lets two test files in different folders share a name (tests/expkit/test_config.py, ...).
+addopts = "--import-mode=importlib"

@@ -243,6 +243,7 @@ The project carries its own setup for Claude Code, the same on every server:
 | `CLAUDE.md` | rules and conventions, read in every session. Add project knowledge in its last section |
 | `.claude/settings.json` | permissions and hooks, enforced by the program |
 | `.claude/skills/experiment/` | the steps of launching an experiment. Type `/experiment lr 0.01 on hpc-gpu`, or just ask for an experiment |
+| `.claude/skills/audit/` | a high-level review of the whole repository in a fresh context: design, stale code, risks to results. Type `/audit`, or `/audit the data pipeline`. It reports and changes nothing |
 | `.claude/hooks/check.sh` | runs `make check` when Claude finishes a turn in which it changed code, and hands a failure back to it once |
 
 The permissions: Claude cannot read `.env` or edit `overleaf/`. It always asks before a

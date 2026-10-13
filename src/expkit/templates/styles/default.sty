@@ -1,0 +1,88 @@
+% Style "default": pale tinted boxes with a rule on the left and a slightly darker title bar.
+% Written by expkit on every export. Edit src/expkit/templates/styles/ in the code repository.
+%
+% To make your own style, copy this file to a new name in the same folder and change it.
+% A style must define the seven colours and the seven commands marked (required) below.
+
+% --- Colours (required) ----------------------------------------------------------
+
+\definecolor{entrycolor}{HTML}{1F2937}       % dates
+\definecolor{experimentcolor}{HTML}{1D4ED8}  % journal: experiment
+\definecolor{meetingcolor}{HTML}{6D28D9}     % journal: meeting
+\definecolor{othercolor}{HTML}{0F766E}       % journal: other
+\definecolor{remarkcolor}{HTML}{047857}      % report: remark
+\definecolor{questioncolor}{HTML}{B45309}    % report: question
+\definecolor{issuecolor}{HTML}{B91C1C}       % report: issue
+\definecolor{titlecolor}{HTML}{1E3A8A}       % title of the document
+\hypersetup{colorlinks, linkcolor=black, urlcolor=experimentcolor}
+
+% How strong the colours are, in percent of the colours above (100 is the full colour).
+\newcommand{\exp@barstrength}{22}    % title bars and subentry headings
+\newcommand{\exp@bodystrength}{8}    % background of the text below a title bar
+\newcommand{\exp@rulestrength}{100}  % rule on the left
+
+% Space between a subentry heading and what follows.
+\newlength{\exp@headskip}
+\setlength{\exp@headskip}{2.5mm}
+
+% --- Title (required): a paper-like title without a date -------------------------
+
+\newcommand{\exp@titleblock}{%
+  \noindent{\LARGE\bfseries\color{titlecolor}\@title}\par
+  \ifx\exp@project\@empty\else\smallskip\noindent{\large\itshape\exp@project}\par\fi
+  \smallskip\noindent\textcolor{titlecolor}{\rule{\linewidth}{1.2pt}}\par\smallskip
+  \noindent{\small\@author
+    \ifx\exp@supervisors\@empty\else\hfill Supervisors: \exp@supervisors\fi}\par\bigskip}
+
+% --- Journal ---------------------------------------------------------------------
+
+% (required) Heading of a day.
+\newcommand{\exp@entry}[1]{%
+  \noindent{\Large\bfseries\color{entrycolor}#1}\par\nobreak
+  \vspace{-0.5\baselineskip}%
+  \noindent\textcolor{entrycolor}{\rule{\linewidth}{1.2pt}}\par\nobreak\smallskip}
+
+% What stands in a title bar: the kind in colour, then a name in black.
+%   "Experiment 012-lora", "Meeting Ana, Bor", "Question 2 Ana"
+\newcommand{\exp@head}[3]{%
+  \textbf{\textcolor{#1}{#2}}\exp@ifempty{#3}{}{\enspace{\normalfont\color{black}#3}}}
+
+% (required) Heading of a subentry: \exp@subentry{colour}{kind}{title}
+\newcommand{\exp@subentry}[3]{%
+  \begin{tcolorbox}[enhanced, sharp corners, boxrule=0pt, frame hidden,
+      colback=#1!\exp@barstrength, borderline west={2.5pt}{0pt}{#1!\exp@rulestrength},
+      left=2.5mm, right=2.5mm, top=1.2mm, bottom=1.2mm, after skip=0pt]
+    \exp@head{#1}{#2}{#3}
+  \end{tcolorbox}\par\nobreak\vskip\exp@headskip}
+
+% (required) Label in front of a note: "Hypothesis."
+\newcommand{\exp@label}[2]{\textbf{\textcolor{#1}{#2.}}\enspace}
+
+% (required) Around the facts of a run. Directly below the heading of an experiment, the
+% two are joined into one box, like the title bar and the text of a remark.
+\newcommand{\exp@infobegin}{%
+  \par
+  % The \nobreak after the skip keeps the box from undoing it.
+  \ifexp@joininfo \nobreak\vskip-\exp@headskip\nobreak \else \smallskip \fi
+  \begin{tcolorbox}[enhanced, sharp corners, boxrule=0pt, frame hidden,
+      colback=experimentcolor!\exp@bodystrength,
+      borderline west={2.5pt}{0pt}{experimentcolor!\exp@rulestrength},
+      left=2.5mm, right=2.5mm, top=1.2mm, bottom=1.2mm, before skip=0pt, fontupper=\small]}
+\newcommand{\exp@infoend}{\end{tcolorbox}}
+% (required) Label of one fact: "Duration"
+\newcommand{\exp@infolabel}[1]{\textcolor{experimentcolor}{#1}}
+
+% --- Reports ---------------------------------------------------------------------
+
+% (required) Remark, question, issue: \exp@block{colour}{kind}{number}{name}{text}
+% The name (who a question is for) can be empty.
+\newcommand{\exp@block}[5]{%
+  \par\smallskip
+  \begin{tcolorbox}[breakable, enhanced, sharp corners, boxrule=0pt, frame hidden,
+      titlerule=0pt, colback=#1!\exp@bodystrength, colbacktitle=#1!\exp@barstrength,
+      borderline west={2.5pt}{0pt}{#1!\exp@rulestrength},
+      left=2.5mm, right=2.5mm, top=1.2mm, bottom=1.2mm,
+      title={\exp@head{#1}{#2~#3}{#4}}]
+    #5
+  \end{tcolorbox}%
+  \smallskip\par}

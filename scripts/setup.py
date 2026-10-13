@@ -126,13 +126,13 @@ def setup_overleaf(values: dict) -> None:
             shutil.copyfile(source, clone / source.name)
             added.append(source.name)
     journal.write_macros(clone)
-    journal._git(clone, "add", "generated/macros.sty", *added)
+    journal._git(clone, "add", "generated", *added)
     if journal._git(clone, "diff", "--cached", "--quiet", check=False).returncode == 0:
         print("Overleaf: clone is ready, nothing to add.")
         return
     journal._git(clone, "commit", "-m", "Add journal and report skeletons")
     journal._git(clone, "push", "origin", "HEAD")
-    print(f"Overleaf: pushed {', '.join(added + ['generated/macros.sty'])}.")
+    print(f"Overleaf: pushed {', '.join(added + ['generated/'])}.")
 
 
 def main() -> int:

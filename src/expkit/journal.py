@@ -2,9 +2,11 @@
 
 What is written, relative to the top folder of the Overleaf project:
 
-    generated/macros.sty               overwritten on every export
-    generated/<experiment_id>/         overwritten on every export: entry.tex and figures
-    journal.tex                        a stub is added ONCE per experiment, nothing else
+    generated/macros.sty, styles/      overwritten on every export
+    generated/<experiment_id>/         overwritten on every export: entry.tex and the files
+                                       from the run's journal/ folder
+    journal.tex                        a stub is added ONCE per experiment, below the entry
+                                       of the day; nothing else is changed
 
 Everything else in the Overleaf project (main.tex with the paper, reports) belongs to you
 and is never touched.
@@ -15,6 +17,7 @@ and is never touched.
 
 from __future__ import annotations
 
+import csv
 import fcntl
 import json
 import logging
@@ -34,10 +37,15 @@ log = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
 
-# Size guard: the Overleaf project holds plots, tables and short text only.
+# What the export picks up from the journal/ folder of a run.
 FIGURE_TYPES = (".pdf", ".png", ".jpg", ".jpeg")
+TABLE_TYPE = ".csv"  # typeset as a table
+TEX_TYPE = ".tex"  # included as it is
+# Size guard: the Overleaf project holds plots, tables and short text only.
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_ENTRY_BYTES = 10 * 1024 * 1024
+MAX_TABLE_ROWS = 50
+MAX_TABLE_COLUMNS = 12
 # Longer values are cut in the entry.
 MAX_VALUE_LENGTH = 60
 
@@ -103,52 +111,98 @@ def find_run(experiment_id: str, run_id: Optional[str] = None,
 
 # --- Rendering ------------------------------------------------------------------------
 
-def _figure_name(path: Path, journal_dir: Path) -> str:
+def _export_name(path: Path, journal_dir: Path) -> str:
     """A file name that is safe in LaTeX: "plots/val loss.pdf" becomes "plots-val-loss.pdf"."""
     stem = "-".join(path.relative_to(journal_dir).with_suffix("").parts)
     return re.sub(r"[^A-Za-z0-9-]+", "-", stem).strip("-") + path.suffix.lower()
 
 
-def _choose_figures(run_dir: Path) -> Tuple[List[Tuple[Path, str]], List[Tuple[str, str]]]:
-    """Figures to copy as (source, new name), and skipped ones as (name, reason)."""
+def _choose_files(run_dir: Path) -> Tuple[List[Tuple[Path, str]], List[Tuple[str, str]]]:
+    """Files of journal/ to export as (source, new name), and skipped ones as (name, reason).
+
+    Sorted by path, so file names decide the order in the entry.
+    """
     journal_dir = run_dir / "journal"
     chosen, skipped, total = [], [], 0
     for path in sorted(journal_dir.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in FIGURE_TYPES:
+        if not path.is_file() or path.suffix.lower() not in (*FIGURE_TYPES, TABLE_TYPE, TEX_TYPE):
             continue
-        size = path.stat().st_size
+        name, size = _export_name(path, journal_dir), path.stat().st_size
         if size > MAX_FILE_BYTES:
             skipped.append((path.name, f"larger than {MAX_FILE_BYTES // 1024 // 1024} MB"))
         elif total + size > MAX_ENTRY_BYTES:
             skipped.append((path.name, "entry size limit reached"))
+        elif name == "entry.tex":
+            skipped.append((path.name, "the name entry.tex is taken by the generated entry"))
         else:
             total += size
-            chosen.append((path, _figure_name(path, journal_dir)))
+            chosen.append((path, name))
     return chosen, skipped
 
 
-def render_entry(run_dir: Path, figures: List[str], skipped: List[Tuple[str, str]]) -> str:
-    """The text of entry.tex: facts only, each as one macro call. macros.sty does the layout."""
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
+def render_table(path: Path, caption: str) -> List[str]:
+    """A .csv file as an exptable: the first row is the header, cells are kept as written.
+
+    Raises ValueError with the reason if the file is not a small table.
+    """
+    try:
+        with open(path, newline="", encoding="utf-8") as file:
+            rows = [row for row in csv.reader(file) if any(cell.strip() for cell in row)]
+    except (UnicodeDecodeError, csv.Error) as error:
+        raise ValueError("not a readable .csv file") from error
+    if len(rows) < 2:
+        raise ValueError("a table needs a header row and at least one more row")
+    width = max(len(row) for row in rows)
+    if len(rows) - 1 > MAX_TABLE_ROWS or width > MAX_TABLE_COLUMNS:
+        raise ValueError(f"more than {MAX_TABLE_ROWS} rows or {MAX_TABLE_COLUMNS} columns")
+    rows = [[cell.strip() for cell in row] + [""] * (width - len(row)) for row in rows]
+    # Columns of numbers are right-aligned, the others left-aligned.
+    columns = ""
+    for index in range(width):
+        cells = [row[index] for row in rows[1:] if row[index]]
+        columns += "r" if cells and all(_is_number(cell) for cell in cells) else "l"
+    lines = ["\\begin{exptable}{%s}{%s}" % (columns, tex_escape(caption))]
+    lines.append("\\exphead{%s}" % " & ".join(tex_escape(cell) for cell in rows[0]))
+    lines += ["\\exprow{%s}" % " & ".join(tex_escape(cell) for cell in row) for row in rows[1:]]
+    lines.append("\\end{exptable}")
+    return lines
+
+
+def render_entry(run_dir: Path, files: List[Tuple[Path, str]],
+                 skipped: List[Tuple[str, str]]) -> str:
+    """The text of entry.tex: facts, then results, each as macro calls. macros.sty does the layout.
+
+    `files` are the chosen files of journal/ as (source, name in the export).
+    """
     info = json.loads((run_dir / "run.json").read_text())
     summary = json.loads((run_dir / "summary.json").read_text())
     experiment_id, git = info["experiment_id"], info["git"]
+    skipped = list(skipped)
 
     lines = [
         f"% Generated by expkit {__version__} from run {info['run_id']}.",
         "% Do not edit: this file is overwritten on every export.",
-        "\\expfacts{%s}{%s}{%s}{%s}{%s}{%s}" % (
-            tex_escape(info["started_at"][:10]),
-            tex_escape(info["run_id"]),
-            tex_escape(git["tag"] or "no tag"),
-            tex_escape((git["sha"] or "unknown")[:10]),
-            tex_escape(info["environment"]["hostname"]),
-            tex_escape(format_duration(summary["duration_seconds"])),
-        ),
+        "\\begin{expinfo}",
+        "\\expcode{Run}{%s}" % tex_escape(info["run_id"]),
+        "\\expcode{Code}{%s at %s}" % (tex_escape(git["tag"] or "no tag"),
+                                       tex_escape((git["sha"] or "unknown")[:10])),
+        "\\expfact{Started}{%s on %s}" % (tex_escape(info["started_at"][:10]),
+                                          tex_escape(info["environment"]["hostname"])),
+        "\\expfact{Duration}{%s}" % tex_escape(format_duration(summary["duration_seconds"])),
     ]
-    if git["dirty"]:
-        lines.append("\\expdirty")
     if info.get("wandb_url"):
         lines.append("\\expwandb{%s}" % info["wandb_url"])
+    if git["dirty"]:
+        lines.append("\\expdirty")
+    lines.append("\\end{expinfo}")
 
     if summary["metrics"]:
         lines.append("\\begin{expmetrics}")
@@ -156,20 +210,34 @@ def render_entry(run_dir: Path, figures: List[str], skipped: List[Tuple[str, str
                   for name, value in summary["metrics"].items()]
         lines.append("\\end{expmetrics}")
 
-    for name in figures:
-        lines.append("\\expfigure{generated/%s/%s}{%s}" % (experiment_id, name, tex_escape(name)))
+    for source, name in files:
+        suffix, caption = source.suffix.lower(), Path(name).stem
+        if suffix == TABLE_TYPE:
+            try:
+                lines += render_table(source, caption)
+            except ValueError as error:
+                skipped.append((source.name, str(error)))
+        elif suffix == TEX_TYPE:
+            lines.append("\\exptex{generated/%s/%s}" % (experiment_id, Path(name).stem))
+        else:
+            lines.append("\\expfigure{generated/%s/%s}{%s}" % (experiment_id, name, tex_escape(caption)))
     for name, reason in skipped:
         lines.append("\\expskipped{%s}{%s}" % (tex_escape(name), tex_escape(reason)))
     return "\n".join(lines) + "\n"
 
 
 def stub(experiment_id: str) -> str:
-    """The lines appended once to journal.tex. The first line is the marker."""
+    """The lines added once to journal.tex. The first line is the marker.
+
+    Order: heading, generated facts and results, then the notes written by hand.
+    """
     return (
         f"\n% exp:{experiment_id}\n"
         f"\\experiment{{{tex_escape(experiment_id)}}}\n"
-        "\\hypothesis{}\n"
         f"\\input{{generated/{experiment_id}/entry}}\n"
+        "\\about{}\n"
+        "\\relevance{}\n"
+        "\\hypothesis{}\n"
         "\\conclusion{}\n"
     )
 
@@ -179,11 +247,16 @@ JOURNAL_TEMPLATE = Path(__file__).resolve().parents[2] / "overleaf_template" / "
 _END_DOCUMENT = "\\end{document}"
 
 
-def _add_stub(journal: Path, experiment_id: str) -> None:
-    """Add the stub to journal.tex unless its marker is already there.
+def _entry_start(text: str, date: str) -> Optional[re.Match]:
+    """Where the entry of a day starts: the line "\\entry{2026-10-13}"."""
+    return re.search(rf"^[ \t]*\\entry\{{{re.escape(date)}\}}", text, flags=re.MULTILINE)
 
-    It goes just above the last \\end{document}, or at the end of a file that has none.
-    Nothing else in the file is changed.
+
+def _add_stub(journal: Path, experiment_id: str, date: str) -> None:
+    """Add the stub to journal.tex, below the entry of `date`, unless its marker is there.
+
+    With an entry of that day, the stub goes to the end of it. Without one, a new entry is
+    started at the end of the document. Nothing else in the file is changed.
     """
     if journal.is_file():
         text = journal.read_text()
@@ -193,37 +266,52 @@ def _add_stub(journal: Path, experiment_id: str) -> None:
         raise FileNotFoundError(f"{journal} does not exist and {JOURNAL_TEMPLATE} is missing too")
     if re.search(rf"^% exp:{re.escape(experiment_id)}\s*$", text, flags=re.MULTILINE):
         return
-    end = text.rfind(_END_DOCUMENT)
-    before, after = (text[:end], text[end:]) if end >= 0 else (text, "")
+    # The end of the document: just above the last \end{document}, or the end of the file.
+    position = text.rfind(_END_DOCUMENT)
+    position = len(text) if position < 0 else position
+    addition = stub(experiment_id)
+    today = _entry_start(text, date)
+    if today:
+        # The end of that day: the next \entry line, if there is one.
+        following = re.search(r"^[ \t]*\\entry\{", text[today.end():], flags=re.MULTILINE)
+        if following:
+            position = today.end() + following.start()
+    else:
+        addition = f"\n\\entry{{{date}}}\n" + addition
+    before, after = text[:position], text[position:]
     if before and not before.endswith("\n"):
         before += "\n"
-    journal.write_text(before + stub(experiment_id) + ("\n" + after if after else ""))
+    journal.write_text(before + addition + ("\n" + after if after else ""))
 
 
 def write_macros(root: Path) -> None:
-    """Write generated/macros.sty from the copy that ships with expkit."""
-    (root / "generated").mkdir(parents=True, exist_ok=True)
-    source = resources.files("expkit").joinpath("templates/macros.sty").read_text()
-    (root / "generated" / "macros.sty").write_text(source)
+    """Write generated/macros.sty and generated/styles/ from the copies that ship with expkit."""
+    templates = resources.files("expkit").joinpath("templates")
+    (root / "generated" / "styles").mkdir(parents=True, exist_ok=True)
+    (root / "generated" / "macros.sty").write_text(templates.joinpath("macros.sty").read_text())
+    for style in templates.joinpath("styles").iterdir():
+        if style.name.endswith(".sty"):
+            (root / "generated" / "styles" / style.name).write_text(style.read_text())
 
 
-def write_entry(run_dir: Path, root: Path) -> str:
+def write_entry(run_dir: Path, root: Path, date: Optional[str] = None) -> str:
     """Write macros, the generated entry and the journal stub below `root`.
 
     `root` is the Overleaf clone, or any folder when exporting for manual upload.
+    `date` is the day whose entry gets a new stub, e.g. "2026-10-13" (default: today).
     Returns the experiment ID.
     """
     experiment_id = json.loads((run_dir / "run.json").read_text())["experiment_id"]
-    figures, skipped = _choose_figures(run_dir)
+    files, skipped = _choose_files(run_dir)
     write_macros(root)
     dest = root / "generated" / experiment_id
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
-    for source, name in figures:
-        shutil.copyfile(source, dest / name)
-    entry = render_entry(run_dir, [name for _, name in figures], skipped)
-    (dest / "entry.tex").write_text(entry)
-    _add_stub(root / "journal.tex", experiment_id)
+    for source, name in files:
+        if source.suffix.lower() != TABLE_TYPE:  # tables are written into entry.tex
+            shutil.copyfile(source, dest / name)
+    (dest / "entry.tex").write_text(render_entry(run_dir, files, skipped))
+    _add_stub(root / "journal.tex", experiment_id, date or time.strftime("%Y-%m-%d"))
     return experiment_id
 
 

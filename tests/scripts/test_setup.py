@@ -81,7 +81,9 @@ def test_first_setup_writes_env_and_fills_the_overleaf_project(project, overleaf
     assert stat.S_IMODE((project / ".env").stat().st_mode) == 0o600
 
     files = git(overleaf, "ls-tree", "-r", "--name-only", "main").splitlines()
-    assert files == ["generated/macros.sty", "journal.tex", "main.tex", "report.tex"]
+    assert [name for name in files if "/styles/" not in name] == [
+        "generated/macros.sty", "journal.tex", "main.tex", "report.tex"]
+    assert "generated/styles/default.sty" in files
     assert git(overleaf, "show", "main:main.tex") == "the paper"  # untouched
 
 

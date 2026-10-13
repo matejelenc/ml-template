@@ -50,5 +50,7 @@ Safe without asking: `--dry-run` launches, `make test`, `make status`, and local
   Each test file starts with a one-line docstring saying what it covers.
 - `scripts/launch/job_wrapper.sh` must stay independent of Python and `expkit`.
 - The journal export and W&B must never make a job fail.
-- LaTeX layout lives only in `src/expkit/templates/macros.sty`; generated entries contain
+- LaTeX: `src/expkit/templates/macros.sty` defines which macros exist, the files in
+  `templates/styles/` define how they look (every style defines the same commands, listed
+  at the end of `macros.sty`). Generated entries contain
   macro calls, not formatting.

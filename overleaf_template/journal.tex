@@ -1,22 +1,33 @@
-% Journal: bookkeeping for the project. A dated log of experiments, meetings and decisions,
-% newest at the bottom. This is its own document: open it in Overleaf and compile.
+% Journal: bookkeeping for the project, newest at the bottom. This is its own document:
+% open it in Overleaf and compile.
 %
-% Experiment entries are added automatically, once per experiment, at the end of the
-% document. Fill in \hypothesis{} and \conclusion{} by hand. The facts between them
-% are generated and refreshed on every export.
+% An entry is a day; experiments, meetings and other notes are subentries below it:
 %
-% Write your own notes anywhere in the document body:
-%   \meeting{2026-10-12}{Ana, Bor}{What we discussed.}
-%   \decision{What we decided.}
+%   \entry{2026-10-13}                 a new day (write the date out, do not use \today)
+%   \meeting{Ana, Bor}{What we discussed.}{Next steps, decisions, advice.}
+%   \other[Optional title]           then write anything below it
+%
+% Experiments are added automatically at the end of the document, once per experiment,
+% below the entry of the day (which is created if it is missing). Fill in \about{},
+% \relevance{}, \hypothesis{} and \conclusion{} by hand; an empty one prints nothing.
+% The facts and results above them are generated and refreshed on every export.
 \documentclass[11pt]{article}
 \usepackage[margin=2.5cm]{geometry}
 % All macros. This file is written by the code repository on every export.
-\usepackage{generated/macros}
+% The option names the style: a file in generated/styles/.
+\usepackage[default]{generated/macros}
+% Figures and tables stay where they are written: in a journal, empty space is fine.
+\floatplacement{figure}{H}
+\floatplacement{table}{H}
 
 \title{Journal}
+\project{Paper or thesis title}
+\author{Your name}
+\supervisors{}
 \date{}
 
 \begin{document}
-\maketitle
+\titleblock
+\tableofcontents
 
 \end{document}

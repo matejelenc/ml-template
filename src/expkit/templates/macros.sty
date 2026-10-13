@@ -1,66 +1,174 @@
-% Macros for the research journal. Written by expkit on every export: do not edit here,
-% changes are overwritten. Edit src/expkit/templates/macros.sty in the code repository.
+% Macros for the journal and the reports. Written by expkit on every export: do not edit
+% here, changes are overwritten. Edit src/expkit/templates/macros.sty in the code repository.
+%
+% This file says WHAT exists (\entry, \meeting, \remark, ...). HOW it looks is decided by a
+% style file in generated/styles/, chosen where the package is loaded:
+%
+%     \usepackage[default]{generated/macros}      loads generated/styles/default.sty
+%
+% To make your own style, copy src/expkit/templates/styles/default.sty to a new name in the
+% same folder, change it, and use the new name as the option.
 \NeedsTeXFormat{LaTeX2e}
-\ProvidesPackage{generated/macros}[expkit journal macros]
+\ProvidesPackage{generated/macros}[expkit journal and report macros]
+
+\newcommand{\exp@style}{default}
+\DeclareOption*{\edef\exp@style{\CurrentOption}}
+\ProcessOptions\relax
 
 \RequirePackage{booktabs}
 \RequirePackage{graphicx}
+\RequirePackage{float}
+\RequirePackage{xcolor}
+\RequirePackage[most]{tcolorbox}
 \RequirePackage{hyperref}
 
-% --- Macros you write by hand in journal.tex ---------------------------------
+% \exp@ifempty{text}{if empty}{if not empty}
+\newcommand{\exp@ifempty}[3]{\if\relax\detokenize{#1}\relax#2\else#3\fi}
 
-% \experiment{012-lora}             heading of an experiment entry
-\newcommand{\experiment}[1]{\subsection*{Experiment \texttt{#1}}}
-% \hypothesis{What I expect and why.}
-\newcommand{\hypothesis}[1]{\par\smallskip\noindent\textbf{Hypothesis.} #1\par}
-% \conclusion{What the result means.}
-\newcommand{\conclusion}[1]{\par\smallskip\noindent\textbf{Conclusion.} #1\par}
-% \meeting{2026-10-12}{Ana, Bor}{Notes.}
-\newcommand{\meeting}[3]{\subsection*{Meeting, #1}\noindent\textit{With #2.}\par\smallskip #3\par}
-% \decision{What was decided.}
-\newcommand{\decision}[1]{\par\smallskip\noindent\textbf{Decision.} #1\par}
+% --- Title block (journal and reports) -------------------------------------------
+%
+% In the preamble:  \title{Journal}  \project{Paper or thesis title}
+%                   \author{Your name}  \supervisors{Ana Novak, Bor Kos}  \date{}
+% In the document:  \titleblock
+\newcommand{\exp@project}{}
+\newcommand{\exp@supervisors}{}
+\newcommand{\project}[1]{\renewcommand{\exp@project}{#1}}
+\newcommand{\supervisors}[1]{\renewcommand{\exp@supervisors}{#1}}
+\newcommand{\titleblock}{\exp@titleblock}
 
-% --- Macros you write by hand in reports -----------------------------------------
+% --- Journal: entries and subentries ---------------------------------------------
+%
+% An entry is a day. Experiments, meetings and other notes are subentries below it.
 
+% \entry{2026-10-13}     heading of a day. The date is written out, never \today:
+%                        \today would change every time the document is compiled.
+\newcommand{\entry}[1]{%
+  \par\addvspace{2\bigskipamount}%
+  \phantomsection\addcontentsline{toc}{section}{#1}%
+  \exp@entry{#1}}
+
+% True right after the heading of an experiment, until its facts (expinfo) are typeset:
+% a style can use it to join the two into one box.
+\newif\ifexp@joininfo
+
+% Start of a subentry: \exp@startsubentry{colour}{kind}{title}
+\newcommand{\exp@startsubentry}[3]{%
+  \global\exp@joininfofalse
+  \par\addvspace{\bigskipamount}%
+  \phantomsection\addcontentsline{toc}{subsection}{#2\exp@ifempty{#3}{}{: #3}}%
+  \exp@subentry{#1}{#2}{#3}}
+
+% \experiment{012-lora}     heading of an experiment (added by the export)
+\newcommand{\experiment}[1]{%
+  \exp@startsubentry{experimentcolor}{Experiment}{\texttt{#1}}\global\exp@joininfotrue}
+
+% Your notes on an experiment. An empty one prints nothing.
+%   \about{What the experiment does.}       \relevance{Why it matters.}
+%   \hypothesis{What I expect and why.}     \conclusion{What the result means.}
+\newcommand{\exp@note}[2]{%
+  \exp@ifempty{#2}{}{\par\smallskip\noindent\exp@label{experimentcolor}{#1}#2\par}}
+\newcommand{\about}[1]{\exp@note{About}{#1}}
+\newcommand{\relevance}[1]{\exp@note{Relevance}{#1}}
+\newcommand{\hypothesis}[1]{\exp@note{Hypothesis}{#1}}
+\newcommand{\conclusion}[1]{\exp@note{Conclusion}{#1}}
+
+% \meeting{Ana, Bor}{What we discussed.}{Next steps, decisions, advice.}
+% The second and third part can hold several paragraphs or a list.
+\newcommand{\meeting}[3]{%
+  \exp@startsubentry{meetingcolor}{Meeting}{#1}%
+  \par\smallskip\noindent\exp@label{meetingcolor}{Discussed}#2\par
+  \smallskip\noindent\exp@label{meetingcolor}{Next steps}#3\par}
+
+% \other              heading only: write anything below it
+% \other[A title]
+\newcommand{\other}[1][]{\exp@startsubentry{othercolor}{Other}{#1}}
+
+% --- Reports: blocks placed directly in the text ---------------------------------
+
+\newcounter{remark}
+\newcounter{question}
+\newcounter{issue}
 % \remark{Something worth pointing out.}
-\newcommand{\remark}[1]{\par\smallskip\noindent\textbf{Remark.} #1\par}
-% \question{Supervisor name}{A question for that person.}
-\newcommand{\question}[2]{\par\smallskip\noindent\textbf{Question for #1.} #2\par}
-% \expentry{012-lora}   the generated facts of an experiment
+\newcommand{\remark}[1]{%
+  \refstepcounter{remark}\exp@block{remarkcolor}{Remark}{\theremark}{}{#1}}
+% \question{A question.}     \question[Ana]{A question for one supervisor.}
+\newcommand{\question}[2][]{%
+  \refstepcounter{question}\exp@block{questioncolor}{Question}{\thequestion}{#1}{#2}}
+% \issue{A problem with the setup that cannot be solved right now.}
+\newcommand{\issue}[1]{%
+  \refstepcounter{issue}\exp@block{issuecolor}{Issue}{\theissue}{}{#1}}
+
+% \expentry{012-lora}   the generated part of an experiment: facts and results
 \newcommand{\expentry}[1]{\input{generated/#1/entry}}
 
-% --- Macros used only by generated entries (generated/<experiment>/entry.tex) ---
+% --- Macros used only by generated entries (generated/<experiment>/entry.tex) ----
 
-% \expfacts{date}{run ID}{git tag}{commit}{host}{duration}
-\newcommand{\expfacts}[6]{%
-  \par\smallskip\noindent
-  \begin{tabular}{@{}ll@{}}
-    Date & #1 \\
-    Run & \texttt{#2} \\
-    Code & \texttt{#3} at commit \texttt{#4} \\
-    Host & \texttt{#5} \\
-    Duration & #6 \\
-  \end{tabular}\par}
+% Facts that identify the run:
+%   \begin{expinfo} \expfact{Duration}{3m 05s} \expcode{Run}{20260101-120000-abcd} \end{expinfo}
+\newenvironment{expinfo}{%
+  \exp@infobegin
+  \begin{tabular}{@{}l@{\hspace{1.5em}}p{0.75\linewidth}@{}}}{%
+  \end{tabular}%
+  \exp@infoend\global\exp@joininfofalse}
+\newcommand{\expfact}[2]{\exp@infolabel{#1} & #2 \\}
+\newcommand{\expcode}[2]{\exp@infolabel{#1} & \texttt{#2} \\}
+\newcommand{\expwandb}[1]{\exp@infolabel{W\&B} & \url{#1} \\}
 % Shown when the run used code with uncommitted changes.
-\newcommand{\expdirty}{\par\noindent\textbf{Warning:} the code had uncommitted changes.\par}
-% \expwandb{https://wandb.ai/...}
-\newcommand{\expwandb}[1]{\par\noindent W\&B: \url{#1}\par}
+\newcommand{\expdirty}{%
+  \exp@infolabel{Warning} & \textbf{\textcolor{issuecolor}{the code had uncommitted changes}} \\}
 
-% Final metrics: one \expmetric{name}{value} per row.
+% Results are centred and stay where they are written.
+
+% Headline metrics: one \expmetric{name}{value} per row.
 \newenvironment{expmetrics}{%
-  \par\medskip\noindent
+  \par\medskip\begin{center}
   \begin{tabular}{@{}lr@{}}
     \toprule Metric & Value \\ \midrule}{%
     \bottomrule
-  \end{tabular}\par}
+  \end{tabular}\end{center}}
 \newcommand{\expmetric}[2]{\texttt{#1} & #2 \\}
 
 % \expfigure{generated/012-lora/loss.pdf}{caption}
 \newcommand{\expfigure}[2]{%
   \par\medskip\noindent
   \begin{minipage}{\linewidth}\centering
-    \includegraphics[width=0.75\linewidth]{#1}\par\smallskip
+    \includegraphics[width=0.75\linewidth, height=0.4\textheight, keepaspectratio]{#1}\par\smallskip
     {\small\texttt{#2}}
-  \end{minipage}\par}
+  \end{minipage}\par\medskip}
+
+% A table made from a .csv file:
+%   \begin{exptable}{lrr}{caption} \exphead{model & acc & f1} \exprow{a & 0.9 & 0.8} \end{exptable}
+\newenvironment{exptable}[2]{%
+  \def\exp@caption{#2}%
+  \par\medskip\begin{center}\small
+  \begin{tabular}{@{}#1@{}}\toprule}{%
+    \bottomrule
+  \end{tabular}\par\smallskip
+  {\small\texttt{\exp@caption}}\end{center}}
+\newcommand{\exphead}[1]{#1 \\ \midrule}
+\newcommand{\exprow}[1]{#1 \\}
+
+% \exptex{generated/012-lora/results}   your own .tex file, included as it is
+\newcommand{\exptex}[1]{\par\medskip{\centering\input{#1}\par}\medskip}
+
 % \expskipped{file name}{reason}
-\newcommand{\expskipped}[2]{\par\noindent\textit{Figure \texttt{#1} not included: #2.}\par}
+\newcommand{\expskipped}[2]{\par\noindent\textit{File \texttt{#1} not included: #2.}\par}
+
+% --- The look --------------------------------------------------------------------
+%
+% A style file defines the seven colours and these commands:
+%   \exp@titleblock                            uses \@title, \@date, \@author, \exp@project,
+%                                              \exp@supervisors
+%   \exp@entry{date}                           heading of a day
+%   \exp@subentry{colour}{kind}{title}         heading of a subentry; the title can be empty
+%   \exp@label{colour}{text}                   label in front of a note ("Hypothesis")
+%   \exp@infobegin  \exp@infoend               around the facts of a run; \ifexp@joininfo is
+%                                              true directly below an experiment heading
+%   \exp@infolabel{text}                       label of one fact ("Duration")
+%   \exp@block{colour}{kind}{number}{name}{text}    remark, question, issue; the name
+%                                              (who a question is for) can be empty
+\IfFileExists{generated/styles/\exp@style.sty}{%
+  \input{generated/styles/\exp@style.sty}}{%
+  \PackageError{generated/macros}{Unknown style '\exp@style'}{%
+    Choose one of the files in generated/styles/, for example
+    \string\usepackage[default]{generated/macros}.}}

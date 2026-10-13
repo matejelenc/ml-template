@@ -1,31 +1,31 @@
 % Report skeleton: a short report to send to supervisors. Copy this file for each report,
 % e.g. report-2026-10.tex, and write it by hand. The code never touches report files.
 %
-% Macros (defined in generated/macros.sty):
+% Coloured blocks, placed directly in the text where they belong:
 %   \remark{Something worth pointing out.}
-%   \question{Supervisor name}{A question for that person.}
-%   \expentry{012-lora}        the generated facts of an experiment: table, metrics, figures
+%   \question{A question.}      \question[Ana]{A question for one supervisor.}
+%   \issue{A problem with the setup that cannot be solved right now.}
+% The generated facts and results of an experiment:
+%   \expentry{012-lora}
 \documentclass[11pt]{article}
 \usepackage[margin=2.5cm]{geometry}
-\usepackage{generated/macros}
+% All macros. This file is written by the code repository on every export.
+% The option names the style: a file in generated/styles/.
+\usepackage[default]{generated/macros}
 
 \title{Report}
-\author{}
+\project{Paper or thesis title}
+\author{Your name}
+\supervisors{}
 \date{\today}
 
 \begin{document}
-\maketitle
+\titleblock
 
 \section{Summary}
 
 \section{Results}
 % \expentry{001-toy}
-
-\section{Remarks}
-% \remark{...}
-
-\section{Questions}
-% \question{Name}{...}
 
 \section{Next steps}
 

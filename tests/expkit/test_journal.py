@@ -292,6 +292,19 @@ def test_file_names_are_made_safe_and_other_files_are_left_out(tmp_path):
     ]
 
 
+def test_two_files_with_the_same_safe_name_do_not_replace_each_other(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    run_dir = make_run(tmp_path, figures=("val/loss.pdf", "val_loss.pdf"))
+    (run_dir / "journal/val/loss.pdf").write_bytes(b"%PDF first")
+    journal.write_entry(run_dir, out)
+    dest = out / "generated/001-toy/20260101-120000-abcd"
+    assert (dest / "val-loss.pdf").read_bytes() == b"%PDF first"
+    entry = (dest / "entry.tex").read_text()
+    assert entry.count(r"\expfigure{") == 1
+    assert r"\expskipped{val\_loss.pdf}{the name val-loss.pdf is taken by val/loss.pdf}" in entry
+
+
 def test_csv_file_becomes_a_table(tmp_path):
     out = tmp_path / "out"
     out.mkdir()

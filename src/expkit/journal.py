@@ -145,6 +145,8 @@ def _choose_files(run_dir: Path) -> tuple[list[tuple[Path, str]], list[tuple[str
     """
     journal_dir = run_dir / "journal"
     chosen, skipped, total = [], [], 0
+    # Names in use. Two files can get the same one: "val/loss.png" and "val_loss.png".
+    taken = {"entry.tex": "the generated entry"}
     for path in sorted(journal_dir.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in (*FIGURE_TYPES, TABLE_TYPE, TEX_TYPE):
             continue
@@ -153,10 +155,11 @@ def _choose_files(run_dir: Path) -> tuple[list[tuple[Path, str]], list[tuple[str
             skipped.append((path.name, f"larger than {MAX_FILE_BYTES // 1024 // 1024} MB"))
         elif total + size > MAX_ENTRY_BYTES:
             skipped.append((path.name, "entry size limit reached"))
-        elif name == "entry.tex":
-            skipped.append((path.name, "the name entry.tex is taken by the generated entry"))
+        elif name in taken:
+            skipped.append((path.name, f"the name {name} is taken by {taken[name]}"))
         else:
             total += size
+            taken[name] = str(path.relative_to(journal_dir))
             chosen.append((path, name))
     return chosen, skipped
 

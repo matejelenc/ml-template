@@ -60,9 +60,18 @@ MAIN_SERIES = "main"
 _SERIES_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$")
 
 
+# How a time is written in the run files. job_wrapper.sh writes the heartbeat the same way.
+_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
 def utc_now() -> str:
     """Current time in UTC, e.g. "2026-10-12T18:00:30Z"."""
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime(_TIME_FORMAT)
+
+
+def parse_utc(text: str) -> datetime:
+    """A time written by utc_now, e.g. "2026-10-12T18:00:30Z", as a datetime in UTC."""
+    return datetime.strptime(text, _TIME_FORMAT).replace(tzinfo=UTC)
 
 
 def sha256_file(path: Path) -> str:
@@ -242,7 +251,7 @@ class Run:
             return
         try:
             getattr(self.wandb, method)(*args, **kwargs)
-        except Exception as error:  # noqa: BLE001 - any W&B failure is non-fatal
+        except Exception as error:  # any W&B failure is non-fatal
             log.warning("W&B failed, continuing without it: %s", error)
             self.wandb = None
 

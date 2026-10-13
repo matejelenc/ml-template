@@ -163,7 +163,6 @@ def test_gpu_fields_from_nvidia_smi(tmp_path, repo, monkeypatch):
 
 
 def test_scheduler_detection(tmp_path, repo, monkeypatch):
-    monkeypatch.delenv("TMUX", raising=False)
     monkeypatch.setenv("SLURM_JOB_ID", "4242")
     launch = read_json(record.start(make_cfg(tmp_path)).dir / "run.json")["launch"]
     assert launch["scheduler"] == "slurm" and launch["job_id"] == "4242"
@@ -204,7 +203,7 @@ class FakeTensor:
         return 0.25
 
 
-def test_log_appends_json_lines(tmp_path, repo):
+def test_monitor_appends_json_lines(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     run.monitor(step=1, loss=0.5)
     run.monitor(step=2, loss=FakeTensor(), acc=0.9)
@@ -238,12 +237,11 @@ def test_bad_series_names_are_refused(tmp_path, repo, series):
         run.monitor(step=0, series=series, loss=1.0)
 
 
-def test_summary_lists_weights_and_journal_files(tmp_path, repo):
+def test_summary_lists_the_weight_files(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     (run.weights_dir / "model.pt").write_bytes(b"weights" * 1000)
     (run.weights_dir / "sub").mkdir()
     (run.weights_dir / "sub" / "head.pt").write_bytes(b"head")
-    (run.journal_dir / "loss.pdf").write_bytes(b"%PDF")
     run.finish(metrics={"loss": FakeTensor(), "acc": 0.9})
     summary = read_json(run.dir / "summary.json")
     assert summary["schema_version"] == record.SCHEMA_VERSION

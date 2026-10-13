@@ -54,7 +54,7 @@ def start(cfg: DictConfig, run: Run) -> Any | None:
             # W&B's own files go inside the run folder, not into the repo.
             dir=str(run.dir),
         )
-    except Exception as error:  # noqa: BLE001 - any W&B failure is non-fatal
+    except Exception as error:  # any W&B failure is non-fatal
         log.warning("W&B could not start, continuing without it: %s", error)
         return None
     run.wandb = wandb_run

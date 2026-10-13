@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from expkit.config import load_env, runs_dir
+from expkit.record import parse_utc
 
 # The job wrapper refreshes the heartbeat every 60 seconds.
 LOST_AFTER_SECONDS = 300
@@ -28,8 +29,7 @@ def run_state(run_dir: Path, now: datetime) -> dict[str, Any]:
         # Started directly, without a launcher: there is no status.json.
         finished = (run_dir / "summary.json").is_file()
         return {"state": "done (direct)" if finished else "unknown", "age": "", "exit_code": None}
-    heartbeat = datetime.strptime(status["heartbeat"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-    seconds = int((now - heartbeat).total_seconds())
+    seconds = int((now - parse_utc(status["heartbeat"])).total_seconds())
     state = status["state"]
     if state == "running" and seconds > LOST_AFTER_SECONDS:
         state = "lost"

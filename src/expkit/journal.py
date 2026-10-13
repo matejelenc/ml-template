@@ -7,7 +7,7 @@ What is written, relative to the top folder of the Overleaf project:
                                        the run's journal/ folder. Overwritten only when the
                                        same run is exported again
     journal.tex                        a stub is added ONCE per run, below the entry of the
-                                       day; nothing else is changed
+                                       day the run finished; nothing else is changed
 
 Everything else in the Overleaf project (main.tex with the paper, reports) belongs to you
 and is never touched.
@@ -31,7 +31,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from expkit import __version__, config, gitutil
+from expkit import __version__, config, gitutil, record
 from expkit.gitutil import PathLike
 
 log = logging.getLogger(__name__)
@@ -319,6 +319,12 @@ def _add_stub(journal: Path, experiment_id: str, run_id: str, date: str) -> None
     journal.write_text(before + addition + ("\n" + after if after else ""))
 
 
+def _finished_on(run_dir: Path) -> str:
+    """The day a run finished, in local time, e.g. "2026-10-13"."""
+    finished = record.parse_utc(json.loads((run_dir / "summary.json").read_text())["finished_at"])
+    return finished.astimezone().strftime("%Y-%m-%d")
+
+
 def write_macros(root: Path) -> None:
     """Write generated/macros.sty and generated/styles/ from the copies that ship with expkit."""
     templates = resources.files("expkit").joinpath("templates")
@@ -335,7 +341,8 @@ def write_entry(run_dir: Path, root: Path, date: str | None = None) -> str:
     Args:
         run_dir: Folder of a finished run.
         root: The Overleaf clone, or any folder when exporting for manual upload.
-        date: The day whose entry gets a new stub, e.g. "2026-10-13". Default: today.
+        date: The day whose entry gets a new stub, e.g. "2026-10-13". Default: the day the
+            run finished, in local time, also when it is exported later.
 
     Returns:
         The name of the entry, `<experiment_id>/<run_id>`.
@@ -352,7 +359,7 @@ def write_entry(run_dir: Path, root: Path, date: str | None = None) -> str:
         if source.suffix.lower() != TABLE_TYPE:  # tables are written into entry.tex
             shutil.copyfile(source, dest / name)
     (dest / "entry.tex").write_text(render_entry(run_dir, files, skipped))
-    _add_stub(root / "journal.tex", experiment_id, run_id, date or time.strftime("%Y-%m-%d"))
+    _add_stub(root / "journal.tex", experiment_id, run_id, date or _finished_on(run_dir))
     return f"{experiment_id}/{run_id}"
 
 
@@ -504,7 +511,7 @@ def export_at_job_end(run_dir: PathLike) -> None:
     """Export at the end of a job. Never raises: a journal problem must not fail a run."""
     try:
         log.info("Journal export: %s", export(run_dir))
-    except Exception as error:  # noqa: BLE001 - see docstring
-        experiment_id = Path(run_dir).parent.name
+    except Exception as error:  # see the docstring
+        run_dir = Path(run_dir)
         log.warning("Journal export failed: %s", error)
-        log.warning("Retry later with: make journal EXP=%s", experiment_id)
+        log.warning("Retry later with: make journal EXP=%s RUN=%s", run_dir.parent.name, run_dir.name)

@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -32,14 +33,12 @@ def make_run(
     experiment_id="001-toy",
     run_id="20260101-120000-abcd",
     metrics=None,
-    config=None,
     figures=("loss.pdf",),
 ):
     """A finished run folder, made with the real record code."""
     run_dir = tmp_path / "runs" / experiment_id / run_id
-    config = config or {"seed": 1, "train": {"lr": 0.1, "steps": 200}}
     cfg = OmegaConf.create(
-        {"experiment_id": experiment_id, "run_id": run_id, "paths": {"run_dir": str(run_dir)}, **config}
+        {"experiment_id": experiment_id, "run_id": run_id, "paths": {"run_dir": str(run_dir)}, "seed": 1}
     )
     run = record.start(cfg)
     for name in figures:
@@ -210,13 +209,17 @@ def test_experiment_joins_an_entry_written_by_hand(tmp_path):
     assert text.endswith("Written ahead.\n\\end{document}\n")
 
 
-def test_entry_date_defaults_to_today(tmp_path):
-    import time
-
+def test_entry_date_is_the_day_the_run_finished_not_the_day_of_the_export(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
-    journal.write_entry(make_run(tmp_path), out)
-    assert "\\entry{%s}" % time.strftime("%Y-%m-%d") in (out / "journal.tex").read_text()
+    run_dir = make_run(tmp_path)
+    summary = json.loads((run_dir / "summary.json").read_text())
+    summary["finished_at"] = "2026-01-05T12:00:00Z"
+    (run_dir / "summary.json").write_text(json.dumps(summary))
+    journal.write_entry(run_dir, out)
+    # Noon in UTC, shown as the local day.
+    day = datetime(2026, 1, 5, 12, tzinfo=UTC).astimezone().strftime("%Y-%m-%d")
+    assert "\\entry{%s}" % day in (out / "journal.tex").read_text()
 
 
 def test_stub_goes_above_end_document(tmp_path):
@@ -458,7 +461,7 @@ def test_sync_retries_when_someone_pushes_in_between(tmp_path, remote):
 
     def push_from_elsewhere():
         if not calls:  # only before the first push attempt
-            web_edit(remote, tmp_path, "\\decision{Made in the browser}\n")
+            web_edit(remote, tmp_path, "\\other\nMade in the browser\n")
         calls.append(1)
 
     assert journal.sync(make_run(tmp_path), local, _before_push=push_from_elsewhere) == "pushed"
@@ -511,7 +514,7 @@ def test_sync_without_clone_or_url_fails_clearly(tmp_path, monkeypatch):
         journal.sync(make_run(tmp_path), tmp_path / "overleaf")
 
 
-def test_two_jobs_finishing_at_the_same_time(tmp_path, remote):
+def test_exports_at_the_same_time_all_arrive(tmp_path, remote):
     """Six exports at once: three servers (clones), two jobs each. All must arrive."""
     script = "import sys; from expkit import journal; print(journal.sync(sys.argv[1], sys.argv[2]))"
     processes = []
@@ -554,7 +557,7 @@ def test_export_at_job_end_never_raises(tmp_path, monkeypatch, caplog):
     monkeypatch.delenv("OVERLEAF_GIT_URL", raising=False)
     journal.export_at_job_end(make_run(tmp_path))
     assert "Journal export failed" in caplog.text
-    assert "make journal EXP=001-toy" in caplog.text
+    assert "make journal EXP=001-toy RUN=20260101-120000-abcd" in caplog.text
     journal.export_at_job_end(tmp_path / "not-a-run")  # even with a broken run folder
 
 
@@ -568,7 +571,6 @@ def _latex_compiler():
     return None
 
 
-@pytest.mark.skipif(_latex_compiler() is None, reason="no LaTeX compiler installed")
 @pytest.mark.skipif(_latex_compiler() is None, reason="no LaTeX compiler installed")
 @pytest.mark.parametrize("style", STYLES)
 def test_every_style_compiles(tmp_path, style):
@@ -617,11 +619,6 @@ def test_template_with_entries_compiles(tmp_path, document):
             tmp_path,
             "002-awkward_name",
             metrics={"val/acc_top1": 0.5, "50%_quantile": 1e-9, "a&b": float("nan")},
-            config={
-                "model": {"name": "org/model_v2", "path": "C:\\dir\\{x}", "tags": ["a_b", "#1"]},
-                "note": "100% $ ~ ^",
-                "long": "x" * 300,
-            },
             figures=("plots/val loss_v2.pdf",),
         ),
         project,

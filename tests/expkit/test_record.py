@@ -54,6 +54,7 @@ def repo(tmp_path, monkeypatch):
 
 # --- run ID ---------------------------------------------------------------
 
+
 def test_run_id_format_and_uniqueness():
     ids = {expkit_config.new_run_id() for _ in range(50)}
     assert all(RUN_ID_PATTERN.match(run_id) for run_id in ids)
@@ -74,9 +75,12 @@ def test_run_id_from_environment(monkeypatch):
 
 # --- start ----------------------------------------------------------------
 
+
 def test_start_creates_the_run_folder(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
-    assert run.dir.is_dir() and run.weights_dir.is_dir() and run.journal_dir.is_dir() and run.eval_dir.is_dir()
+    assert (
+        run.dir.is_dir() and run.weights_dir.is_dir() and run.journal_dir.is_dir() and run.eval_dir.is_dir()
+    )
     assert (run.dir / "run.json").is_file()
     assert (run.dir / "config.yaml").is_file()
 
@@ -90,11 +94,8 @@ def test_run_json_fields(tmp_path, repo):
     assert re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", info["started_at"])
     assert info["run_dir"] == str(run.dir)
     assert set(info["git"]) == {"sha", "tag", "repo_url", "dirty", "allow_dirty"}
-    assert set(info["environment"]) == {
-        "hostname", "python", "lockfile_sha256", "cuda", "gpu_driver", "gpus"
-    }
+    assert set(info["environment"]) == {"hostname", "python", "lockfile_sha256", "cuda", "gpu_driver", "gpus"}
     assert set(info["launch"]) == {"scheduler", "job_id", "command"}
-    assert len(info["config_sha256"]) == 64
     assert info["wandb_url"] is None
 
 
@@ -170,6 +171,7 @@ def test_scheduler_detection(tmp_path, repo, monkeypatch):
 
 # --- config ---------------------------------------------------------------
 
+
 def test_resolved_config_is_written_with_schema_version(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     saved = yaml.safe_load((run.dir / "config.yaml").read_text())
@@ -192,15 +194,8 @@ def test_secrets_reach_no_run_file(tmp_path, repo, monkeypatch):
     assert "<redacted>" in (run.dir / "config.yaml").read_text()
 
 
-def test_config_hash_ignores_run_identity_but_not_settings():
-    base = {"experiment_id": "001", "run_id": "a", "paths": {"run_dir": "/x"}, "train": {"lr": 0.1}}
-    same = {"experiment_id": "002", "run_id": "b", "paths": {"run_dir": "/y"}, "train": {"lr": 0.1}}
-    different = {**base, "train": {"lr": 0.2}}
-    assert record.config_hash(base) == record.config_hash(same)
-    assert record.config_hash(base) != record.config_hash(different)
-
-
 # --- metrics and summary ----------------------------------------------------
+
 
 class FakeTensor:
     """Behaves like a NumPy or PyTorch scalar: not JSON, but has .item()."""
@@ -254,12 +249,13 @@ def test_summary_lists_weights_and_journal_files(tmp_path, repo):
     assert summary["schema_version"] == record.SCHEMA_VERSION
     assert summary["metrics"] == {"loss": 0.25, "acc": 0.9}
     assert summary["duration_seconds"] >= 0
-    assert summary["journal"] == ["journal/loss.pdf"]
     assert summary["weights"] == [
-        {"path": "weights/model.pt", "size_bytes": 7000,
-         "sha256": hashlib.sha256(b"weights" * 1000).hexdigest()},
-        {"path": "weights/sub/head.pt", "size_bytes": 4,
-         "sha256": hashlib.sha256(b"head").hexdigest()},
+        {
+            "path": "weights/model.pt",
+            "size_bytes": 7000,
+            "sha256": hashlib.sha256(b"weights" * 1000).hexdigest(),
+        },
+        {"path": "weights/sub/head.pt", "size_bytes": 4, "sha256": hashlib.sha256(b"head").hexdigest()},
     ]
 
 

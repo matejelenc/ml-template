@@ -89,7 +89,10 @@ def launch(project, launcher, *args, run=False, env=None):
             environment.pop(name, None)
     return subprocess.run(
         ["bash", f"scripts/launch/{launcher}.sh", *args],
-        cwd=project, env=environment, capture_output=True, text=True,
+        cwd=project,
+        env=environment,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -99,23 +102,29 @@ def only_run(project, experiment="001-toy"):
 
 
 # Runs the real toy experiment with the Python that runs the tests.
-TOY = [sys.executable, "scripts/experiment.py", "+experiment=001-toy", "train.steps=20",
-       "journal.export=false"]
+TOY = [
+    sys.executable,
+    "scripts/experiment.py",
+    "+experiment=001-toy",
+    "train.steps=20",
+    "journal.export=false",
+]
 
 
 # --- job wrapper ---------------------------------------------------------------------
 
+
 def wrapper(run_dir, *command, **kwargs):
-    return subprocess.run(["bash", str(WRAPPER), str(run_dir), *command],
-                          capture_output=True, text=True, **kwargs)
+    return subprocess.run(
+        ["bash", str(WRAPPER), str(run_dir), *command], capture_output=True, text=True, **kwargs
+    )
 
 
 def test_wrapper_records_success_and_output(tmp_path):
     result = wrapper(tmp_path / "run", "bash", "-c", "echo out; echo err >&2")
     assert result.returncode == 0
     status = read_json(tmp_path / "run/status.json")
-    assert status == {"schema_version": 1, "state": "done", "heartbeat": status["heartbeat"],
-                      "exit_code": 0}
+    assert status == {"schema_version": 1, "state": "done", "heartbeat": status["heartbeat"], "exit_code": 0}
     assert (tmp_path / "run/output.log").read_text() == "out\nerr\n"
 
 
@@ -144,12 +153,12 @@ def test_wrapper_needs_a_command(tmp_path):
 
 @pytest.mark.parametrize("signal_number", [signal.SIGTERM, signal.SIGINT, signal.SIGHUP])
 def test_wrapper_records_cancellation_and_stops_the_job(tmp_path, signal_number):
-    """scancel and a Slurm time limit send SIGTERM, tmux kill-session SIGHUP, Ctrl-C SIGINT."""
+    """Signals: scancel and a Slurm time limit send SIGTERM, tmux kill-session SIGHUP, Ctrl-C SIGINT."""
     run_dir = tmp_path / "run"
-    job = [sys.executable, "-c",
-           "import os, time; print(os.getpid(), flush=True); time.sleep(60)"]
-    process = subprocess.Popen(["bash", str(WRAPPER), str(run_dir), *job],
-                               env={**os.environ, "HEARTBEAT_SECONDS": "1"})
+    job = [sys.executable, "-c", "import os, time; print(os.getpid(), flush=True); time.sleep(60)"]
+    process = subprocess.Popen(
+        ["bash", str(WRAPPER), str(run_dir), *job], env={**os.environ, "HEARTBEAT_SECONDS": "1"}
+    )
     deadline = time.time() + 10
     while not (run_dir / "output.log").is_file() or not (run_dir / "output.log").read_text().strip():
         assert time.time() < deadline, "job did not start"
@@ -167,8 +176,9 @@ def test_wrapper_records_cancellation_and_stops_the_job(tmp_path, signal_number)
 
 def test_wrapper_refreshes_the_heartbeat(tmp_path):
     run_dir = tmp_path / "run"
-    process = subprocess.Popen(["bash", str(WRAPPER), str(run_dir), "sleep", "3.5"],
-                               env={**os.environ, "HEARTBEAT_SECONDS": "1"})
+    process = subprocess.Popen(
+        ["bash", str(WRAPPER), str(run_dir), "sleep", "3.5"], env={**os.environ, "HEARTBEAT_SECONDS": "1"}
+    )
     time.sleep(0.5)
     first = read_json(run_dir / "status.json")
     time.sleep(2.2)
@@ -187,6 +197,7 @@ def test_wrapper_does_not_depend_on_the_library():
 
 # --- prepare: git checks and tags --------------------------------------------------------
 
+
 def test_dry_run_changes_nothing(project):
     result = launch(project, "tmux", "--dry-run", *TOY)
     assert result.returncode == 0, result.stderr
@@ -198,8 +209,9 @@ def test_dry_run_changes_nothing(project):
 
 
 def test_the_exact_command_is_printed_before_submitting(project):
-    result = launch(project, "tmux", "--dry-run", "scripts/experiment.py", "+experiment=001-toy",
-                    "train.lr=0.3")
+    result = launch(
+        project, "tmux", "--dry-run", "scripts/experiment.py", "+experiment=001-toy", "train.lr=0.3"
+    )
     assert "job_wrapper.sh" in result.stdout
     # A command that starts with a .py file is run with uv.
     assert "uv run python scripts/experiment.py +experiment=001-toy train.lr=0.3" in result.stdout
@@ -303,8 +315,15 @@ def test_scratch_run_needs_no_tag_and_no_clean_tree(project):
 
 
 def test_experiment_in_a_subfolder(project):
-    result = launch(project, "tmux", sys.executable, "scripts/experiment.py",
-                    "+experiment=vision/002-sub", "train.steps=20", "journal.export=false")
+    result = launch(
+        project,
+        "tmux",
+        sys.executable,
+        "scripts/experiment.py",
+        "+experiment=vision/002-sub",
+        "train.steps=20",
+        "journal.export=false",
+    )
     assert result.returncode == 0, result.stderr
     assert git(project, "tag") == "exp/002-sub"
     info = read_json(only_run(project, "002-sub") / "run.json")
@@ -319,6 +338,7 @@ def test_unknown_option_and_missing_command(project):
 
 # --- tmux --------------------------------------------------------------------------------
 
+
 def test_tmux_launch_end_to_end(project):
     result = launch(project, "tmux", *TOY)
     assert result.returncode == 0, result.stderr
@@ -326,7 +346,9 @@ def test_tmux_launch_end_to_end(project):
     # The session is named after the run ID.
     assert (project.parent / "fake.log").read_text().startswith(f"new-session -d -s {run_dir.name} ")
     assert read_json(run_dir / "status.json") == {
-        "schema_version": 1, "state": "done", "exit_code": 0,
+        "schema_version": 1,
+        "state": "done",
+        "exit_code": 0,
         "heartbeat": read_json(run_dir / "status.json")["heartbeat"],
     }
     info = read_json(run_dir / "run.json")
@@ -338,8 +360,14 @@ def test_tmux_launch_end_to_end(project):
 
 
 def test_failed_job_is_recorded(project):
-    result = launch(project, "tmux", sys.executable, "scripts/experiment.py", "+experiment=001-toy",
-                    "train.steps=not-a-number")
+    result = launch(
+        project,
+        "tmux",
+        sys.executable,
+        "scripts/experiment.py",
+        "+experiment=001-toy",
+        "train.steps=not-a-number",
+    )
     assert result.returncode == 0  # the launch itself worked
     run_dir = only_run(project)
     status = read_json(run_dir / "status.json")
@@ -368,6 +396,7 @@ def test_runs_dir_comes_from_dot_env(project):
 
 # --- Slurm ---------------------------------------------------------------------------------
 
+
 def test_slurm_needs_a_profile(project):
     result = launch(project, "slurm", *TOY)
     assert result.returncode == 1 and "no profile" in result.stderr
@@ -375,8 +404,7 @@ def test_slurm_needs_a_profile(project):
 
 
 def test_slurm_job_is_queued_with_the_profile_header(project):
-    result = launch(project, "slurm", "--profile", "hpc-gpu", "--sbatch", "--time=12:00:00 --mem=64G",
-                    *TOY)
+    result = launch(project, "slurm", "--profile", "hpc-gpu", "--sbatch", "--time=12:00:00 --mem=64G", *TOY)
     assert result.returncode == 0, result.stderr
     assert "submitted Slurm job 4242" in result.stdout
     run_dir = only_run(project)

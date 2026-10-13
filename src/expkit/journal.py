@@ -3,10 +3,11 @@
 What is written, relative to the top folder of the Overleaf project:
 
     generated/macros.sty, styles/      overwritten on every export
-    generated/<experiment_id>/         overwritten on every export: entry.tex and the files
-                                       from the run's journal/ folder
-    journal.tex                        a stub is added ONCE per experiment, below the entry
-                                       of the day; nothing else is changed
+    generated/<experiment_id>/<run_id>/    one folder per run: entry.tex and the files from
+                                       the run's journal/ folder. Overwritten only when the
+                                       same run is exported again
+    journal.tex                        a stub is added ONCE per run, below the entry of the
+                                       day; nothing else is changed
 
 Everything else in the Overleaf project (main.tex with the paper, reports) belongs to you
 and is never touched.
@@ -14,8 +15,6 @@ and is never touched.
     journal.export(run_dir)                  # push to Overleaf
     journal.export(run_dir, out="folder")    # write to a local folder instead (manual upload)
 """
-
-from __future__ import annotations
 
 import csv
 import fcntl
@@ -27,15 +26,16 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
-from expkit import __version__, gitutil
+from expkit import __version__, config, gitutil
+from expkit.gitutil import PathLike
 
 log = logging.getLogger(__name__)
 
-PathLike = Union[str, Path]
 
 # What the export picks up from the journal/ folder of a run.
 FIGURE_TYPES = (".pdf", ".png", ".jpg", ".jpeg")
@@ -58,13 +58,21 @@ GIT_TIMEOUT_SECONDS = 120
 # --- LaTeX text helpers ---------------------------------------------------------
 
 _TEX_SPECIAL = {
-    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
-    "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
 }
 
 
 def tex_escape(text: Any) -> str:
-    """Make any text safe to place in LaTeX, e.g. "train_loss" becomes "train\\_loss"."""
+    r"""Make any text safe to place in LaTeX, e.g. "train_loss" becomes "train\_loss"."""
     return "".join(_TEX_SPECIAL.get(char, char) for char in str(text))
 
 
@@ -94,10 +102,22 @@ def format_duration(seconds: float) -> str:
 
 # --- Reading a run folder -----------------------------------------------------------
 
-def find_run(experiment_id: str, run_id: Optional[str] = None,
-             runs_dir: Optional[PathLike] = None) -> Path:
-    """Folder of a finished run: the given run, or the newest one of the experiment."""
-    experiment_dir = Path(runs_dir or os.environ.get("RUNS_DIR") or "runs") / experiment_id
+
+def find_run(experiment_id: str, run_id: str | None = None, runs_dir: PathLike | None = None) -> Path:
+    """Find the folder of a finished run.
+
+    Args:
+        experiment_id: The experiment, e.g. "012-lora".
+        run_id: The run. Default: the newest finished run of the experiment.
+        runs_dir: Where run folders are. Default: RUNS_DIR.
+
+    Returns:
+        The run folder.
+
+    Raises:
+        FileNotFoundError: If no such run has a summary.json, which means none finished.
+    """
+    experiment_dir = (Path(runs_dir) if runs_dir else config.runs_dir()) / experiment_id
     if run_id:
         candidates = [experiment_dir / run_id]
     else:
@@ -111,13 +131,14 @@ def find_run(experiment_id: str, run_id: Optional[str] = None,
 
 # --- Rendering ------------------------------------------------------------------------
 
+
 def _export_name(path: Path, journal_dir: Path) -> str:
     """A file name that is safe in LaTeX: "plots/val loss.pdf" becomes "plots-val-loss.pdf"."""
     stem = "-".join(path.relative_to(journal_dir).with_suffix("").parts)
     return re.sub(r"[^A-Za-z0-9-]+", "-", stem).strip("-") + path.suffix.lower()
 
 
-def _choose_files(run_dir: Path) -> Tuple[List[Tuple[Path, str]], List[Tuple[str, str]]]:
+def _choose_files(run_dir: Path) -> tuple[list[tuple[Path, str]], list[tuple[str, str]]]:
     """Files of journal/ to export as (source, new name), and skipped ones as (name, reason).
 
     Sorted by path, so file names decide the order in the entry.
@@ -148,10 +169,18 @@ def _is_number(text: str) -> bool:
     return True
 
 
-def render_table(path: Path, caption: str) -> List[str]:
+def render_table(path: Path, caption: str) -> list[str]:
     """A .csv file as an exptable: the first row is the header, cells are kept as written.
 
-    Raises ValueError with the reason if the file is not a small table.
+    Args:
+        path: The .csv file.
+        caption: Text shown with the table.
+
+    Returns:
+        The lines of LaTeX.
+
+    Raises:
+        ValueError: If the file is not a small table. The message says why.
     """
     try:
         with open(path, newline="", encoding="utf-8") as file:
@@ -176,26 +205,26 @@ def render_table(path: Path, caption: str) -> List[str]:
     return lines
 
 
-def render_entry(run_dir: Path, files: List[Tuple[Path, str]],
-                 skipped: List[Tuple[str, str]]) -> str:
+def render_entry(run_dir: Path, files: list[tuple[Path, str]], skipped: list[tuple[str, str]]) -> str:
     """The text of entry.tex: facts, then results, each as macro calls. macros.sty does the layout.
 
     `files` are the chosen files of journal/ as (source, name in the export).
     """
     info = json.loads((run_dir / "run.json").read_text())
     summary = json.loads((run_dir / "summary.json").read_text())
-    experiment_id, git = info["experiment_id"], info["git"]
+    git = info["git"]
+    folder = "generated/%s/%s" % (info["experiment_id"], info["run_id"])
     skipped = list(skipped)
 
     lines = [
         f"% Generated by expkit {__version__} from run {info['run_id']}.",
-        "% Do not edit: this file is overwritten on every export.",
+        "% Do not edit: this file is overwritten when the run is exported again.",
         "\\begin{expinfo}",
         "\\expcode{Run}{%s}" % tex_escape(info["run_id"]),
-        "\\expcode{Code}{%s at %s}" % (tex_escape(git["tag"] or "no tag"),
-                                       tex_escape((git["sha"] or "unknown")[:10])),
-        "\\expfact{Started}{%s on %s}" % (tex_escape(info["started_at"][:10]),
-                                          tex_escape(info["environment"]["hostname"])),
+        "\\expcode{Code}{%s at %s}"
+        % (tex_escape(git["tag"] or "no tag"), tex_escape((git["sha"] or "unknown")[:10])),
+        "\\expfact{Started}{%s on %s}"
+        % (tex_escape(info["started_at"][:10]), tex_escape(info["environment"]["hostname"])),
         "\\expfact{Duration}{%s}" % tex_escape(format_duration(summary["duration_seconds"])),
     ]
     if info.get("wandb_url"):
@@ -206,8 +235,10 @@ def render_entry(run_dir: Path, files: List[Tuple[Path, str]],
 
     if summary["metrics"]:
         lines.append("\\begin{expmetrics}")
-        lines += ["\\expmetric{%s}{%s}" % (tex_escape(name), format_value(value))
-                  for name, value in summary["metrics"].items()]
+        lines += [
+            "\\expmetric{%s}{%s}" % (tex_escape(name), format_value(value))
+            for name, value in summary["metrics"].items()
+        ]
         lines.append("\\end{expmetrics}")
 
     for source, name in files:
@@ -218,23 +249,23 @@ def render_entry(run_dir: Path, files: List[Tuple[Path, str]],
             except ValueError as error:
                 skipped.append((source.name, str(error)))
         elif suffix == TEX_TYPE:
-            lines.append("\\exptex{generated/%s/%s}" % (experiment_id, Path(name).stem))
+            lines.append("\\exptex{%s/%s}" % (folder, Path(name).stem))
         else:
-            lines.append("\\expfigure{generated/%s/%s}{%s}" % (experiment_id, name, tex_escape(caption)))
+            lines.append("\\expfigure{%s/%s}{%s}" % (folder, name, tex_escape(caption)))
     for name, reason in skipped:
         lines.append("\\expskipped{%s}{%s}" % (tex_escape(name), tex_escape(reason)))
     return "\n".join(lines) + "\n"
 
 
-def stub(experiment_id: str) -> str:
-    """The lines added once to journal.tex. The first line is the marker.
+def stub(experiment_id: str, run_id: str) -> str:
+    """The lines added once per run to journal.tex. The first line is the marker.
 
     Order: heading, generated facts and results, then the notes written by hand.
     """
     return (
-        f"\n% exp:{experiment_id}\n"
+        f"\n% run:{experiment_id}/{run_id}\n"
         f"\\experiment{{{tex_escape(experiment_id)}}}\n"
-        f"\\input{{generated/{experiment_id}/entry}}\n"
+        f"\\input{{generated/{experiment_id}/{run_id}/entry}}\n"
         "\\about{}\n"
         "\\relevance{}\n"
         "\\hypothesis{}\n"
@@ -247,13 +278,13 @@ JOURNAL_TEMPLATE = Path(__file__).resolve().parents[2] / "overleaf_template" / "
 _END_DOCUMENT = "\\end{document}"
 
 
-def _entry_start(text: str, date: str) -> Optional[re.Match]:
-    """Where the entry of a day starts: the line "\\entry{2026-10-13}"."""
+def _entry_start(text: str, date: str) -> re.Match[str] | None:
+    r"""Where the entry of a day starts: the line "\entry{2026-10-13}"."""
     return re.search(rf"^[ \t]*\\entry\{{{re.escape(date)}\}}", text, flags=re.MULTILINE)
 
 
-def _add_stub(journal: Path, experiment_id: str, date: str) -> None:
-    """Add the stub to journal.tex, below the entry of `date`, unless its marker is there.
+def _add_stub(journal: Path, experiment_id: str, run_id: str, date: str) -> None:
+    """Add the stub of a run to journal.tex, below the entry of `date`, unless its marker is there.
 
     With an entry of that day, the stub goes to the end of it. Without one, a new entry is
     started at the end of the document. Nothing else in the file is changed.
@@ -264,16 +295,17 @@ def _add_stub(journal: Path, experiment_id: str, date: str) -> None:
         text = JOURNAL_TEMPLATE.read_text()
     else:
         raise FileNotFoundError(f"{journal} does not exist and {JOURNAL_TEMPLATE} is missing too")
-    if re.search(rf"^% exp:{re.escape(experiment_id)}\s*$", text, flags=re.MULTILINE):
+    marker = re.escape(f"% run:{experiment_id}/{run_id}")
+    if re.search(rf"^{marker}\s*$", text, flags=re.MULTILINE):
         return
     # The end of the document: just above the last \end{document}, or the end of the file.
     position = text.rfind(_END_DOCUMENT)
     position = len(text) if position < 0 else position
-    addition = stub(experiment_id)
+    addition = stub(experiment_id, run_id)
     today = _entry_start(text, date)
     if today:
         # The end of that day: the next \entry line, if there is one.
-        following = re.search(r"^[ \t]*\\entry\{", text[today.end():], flags=re.MULTILINE)
+        following = re.search(r"^[ \t]*\\entry\{", text[today.end() :], flags=re.MULTILINE)
         if following:
             position = today.end() + following.start()
     else:
@@ -294,28 +326,35 @@ def write_macros(root: Path) -> None:
             (root / "generated" / "styles" / style.name).write_text(style.read_text())
 
 
-def write_entry(run_dir: Path, root: Path, date: Optional[str] = None) -> str:
+def write_entry(run_dir: Path, root: Path, date: str | None = None) -> str:
     """Write macros, the generated entry and the journal stub below `root`.
 
-    `root` is the Overleaf clone, or any folder when exporting for manual upload.
-    `date` is the day whose entry gets a new stub, e.g. "2026-10-13" (default: today).
-    Returns the experiment ID.
+    Args:
+        run_dir: Folder of a finished run.
+        root: The Overleaf clone, or any folder when exporting for manual upload.
+        date: The day whose entry gets a new stub, e.g. "2026-10-13". Default: today.
+
+    Returns:
+        The name of the entry, `<experiment_id>/<run_id>`.
     """
-    experiment_id = json.loads((run_dir / "run.json").read_text())["experiment_id"]
+    info = json.loads((run_dir / "run.json").read_text())
+    experiment_id, run_id = info["experiment_id"], info["run_id"]
     files, skipped = _choose_files(run_dir)
     write_macros(root)
-    dest = root / "generated" / experiment_id
+    # Only the folder of this run is replaced: other runs of the experiment keep theirs.
+    dest = root / "generated" / experiment_id / run_id
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
     for source, name in files:
         if source.suffix.lower() != TABLE_TYPE:  # tables are written into entry.tex
             shutil.copyfile(source, dest / name)
     (dest / "entry.tex").write_text(render_entry(run_dir, files, skipped))
-    _add_stub(root / "journal.tex", experiment_id, date or time.strftime("%Y-%m-%d"))
-    return experiment_id
+    _add_stub(root / "journal.tex", experiment_id, run_id, date or time.strftime("%Y-%m-%d"))
+    return f"{experiment_id}/{run_id}"
 
 
 # --- Sync with Overleaf ---------------------------------------------------------------
+
 
 class SyncError(RuntimeError):
     """The export could not be pushed. The run itself is unaffected."""
@@ -323,25 +362,28 @@ class SyncError(RuntimeError):
 
 # Git asks this helper for the password. It answers with OVERLEAF_TOKEN from the environment,
 # so the token is never stored in a git config, a URL or a credentials file.
-_CREDENTIAL_HELPER = (
-    '!f() { test "$1" = get && echo username=git && echo "password=$OVERLEAF_TOKEN"; }; f'
-)
+_CREDENTIAL_HELPER = '!f() { test "$1" = get && echo username=git && echo "password=$OVERLEAF_TOKEN"; }; f'
 
 
-def _git(repo: Optional[Path], *args: str, check: bool = True) -> subprocess.CompletedProcess:
+def _git(repo: Path | None, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run git for the Overleaf clone: never asks questions, never hangs forever."""
     command = [
         "git",
-        "-c", "credential.helper=",  # ignore other helpers
-        "-c", f"credential.helper={_CREDENTIAL_HELPER}",
-        "-c", "user.name=expkit",
-        "-c", "user.email=expkit@localhost",
+        "-c",
+        "credential.helper=",  # ignore other helpers
+        "-c",
+        f"credential.helper={_CREDENTIAL_HELPER}",
+        "-c",
+        "user.name=expkit",
+        "-c",
+        "user.email=expkit@localhost",
         *args,
     ]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
-        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True,
-                                timeout=GIT_TIMEOUT_SECONDS)
+        result = subprocess.run(
+            command, cwd=repo, env=env, capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS
+        )
     except subprocess.TimeoutExpired as error:
         raise SyncError(f"git {args[0]} timed out after {GIT_TIMEOUT_SECONDS} s") from error
     if check and result.returncode != 0:
@@ -366,15 +408,29 @@ def _ensure_clone(repo: Path) -> None:
     _git(None, "clone", url, str(repo))
 
 
-def sync(run_dir: PathLike, repo: Optional[PathLike] = None, _before_push=None) -> str:
+def sync(
+    run_dir: PathLike,
+    repo: PathLike | None = None,
+    _before_push: Callable[[], None] | None = None,
+) -> str:
     """Write the entry into the Overleaf clone and push it.
-
-    Returns "pushed" or "unchanged". Raises SyncError if it cannot be pushed.
 
     Each attempt starts from the newest state of the Overleaf project (you may have edited it
     in the browser). If the push is rejected because someone pushed in between, the local
     commit is dropped and the whole step is repeated. The export only ever adds its own
     files, so nothing of yours is merged or overwritten.
+
+    Args:
+        run_dir: Folder of a finished run.
+        repo: The Overleaf clone. Default: overleaf_dir().
+        _before_push: Called just before each push. Only for tests, to simulate a push
+            from elsewhere.
+
+    Returns:
+        "pushed", or "unchanged" if the Overleaf project already had this entry.
+
+    Raises:
+        SyncError: If the clone has local changes or the push failed every time.
     """
     run_dir = Path(run_dir)
     repo = Path(repo) if repo else overleaf_dir()
@@ -391,11 +447,11 @@ def sync(run_dir: PathLike, repo: Optional[PathLike] = None, _before_push=None) 
         for attempt in range(1, PUSH_ATTEMPTS + 1):
             _git(repo, "pull", "--rebase")
             try:
-                experiment_id = write_entry(run_dir, repo)
+                entry = write_entry(run_dir, repo)
                 _git(repo, "add", "generated", "journal.tex")
                 if _git(repo, "diff", "--cached", "--quiet", check=False).returncode == 0:
                     return "unchanged"
-                _git(repo, "commit", "-m", f"journal: {experiment_id}")
+                _git(repo, "commit", "-m", f"journal: {entry}")
             except BaseException:
                 # Leave the clone as it was. Everything changed at this point is ours.
                 _git(repo, "reset", "--hard", "HEAD", check=False)
@@ -408,8 +464,9 @@ def sync(run_dir: PathLike, repo: Optional[PathLike] = None, _before_push=None) 
                 return "pushed"
             # Drop our commit and start again from the newest remote state.
             _git(repo, "reset", "--hard", "HEAD~1")
-            log.info("Overleaf push rejected (attempt %d of %d): %s",
-                     attempt, PUSH_ATTEMPTS, push.stderr.strip())
+            log.info(
+                "Overleaf push rejected (attempt %d of %d): %s", attempt, PUSH_ATTEMPTS, push.stderr.strip()
+            )
             if attempt < PUSH_ATTEMPTS:
                 time.sleep(RETRY_WAIT_SECONDS * random.random())
         raise SyncError(f"push to Overleaf failed {PUSH_ATTEMPTS} times: {push.stderr.strip()}")
@@ -417,8 +474,20 @@ def sync(run_dir: PathLike, repo: Optional[PathLike] = None, _before_push=None) 
 
 # --- Entry points ---------------------------------------------------------------------
 
-def export(run_dir: PathLike, out: Optional[PathLike] = None) -> str:
-    """Export one finished run. With `out`, write to that folder and push nothing."""
+
+def export(run_dir: PathLike, out: PathLike | None = None) -> str:
+    """Export one finished run to the journal.
+
+    Args:
+        run_dir: Folder of a finished run.
+        out: Write the files to this folder and push nothing. Default: push to Overleaf.
+
+    Returns:
+        One line saying what was done, to print or log.
+
+    Raises:
+        SyncError: If the entry could not be pushed to Overleaf.
+    """
     run_dir = Path(run_dir)
     if out is not None:
         out = Path(out)

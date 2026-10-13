@@ -14,7 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from expkit import journal, record, tracking
 from expkit.config import SCRATCH, load_env, register_resolvers
-from expkit.redact import redact
+from expkit.redact import redact_config
 
 # Read .env before Hydra builds the config, because the config uses RUNS_DIR and DATA_DIR.
 load_env()
@@ -61,8 +61,9 @@ def plot_loss(run: record.Run) -> None:
 # version_base pins Hydra's defaults, so every Hydra version from 1.2 on behaves the same.
 @hydra.main(version_base="1.2", config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
+    """Run one experiment: record, train, write the summary, export the journal entry."""
     # Printed output ends up in log files, so secrets are removed here too.
-    print(OmegaConf.to_yaml(redact(OmegaConf.to_container(cfg, resolve=True))))
+    print(OmegaConf.to_yaml(redact_config(cfg)))
     run = record.start(cfg)
     tracking.start(cfg, run)
     final_loss = train(cfg, run)

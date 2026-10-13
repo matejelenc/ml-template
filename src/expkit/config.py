@@ -1,22 +1,22 @@
 """Small helpers used by the Hydra config."""
 
-from __future__ import annotations
-
 import os
 import secrets
 import time
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from dotenv import dotenv_values, find_dotenv
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 
+from expkit import gitutil
+
 # Run folder name for runs started without an experiment file (quick debugging runs).
 SCRATCH = "scratch"
 
 # The run ID is made once per process, so every place in the config sees the same value.
-_run_id: Optional[str] = None
+_run_id: str | None = None
 
 
 def new_run_id() -> str:
@@ -45,12 +45,15 @@ def _experiment_id() -> str:
     return str(choice).split("/")[-1] if choice else SCRATCH
 
 
-def load_env(path: Union[str, Path, None] = None) -> None:
+def load_env(path: str | Path | None = None) -> None:
     """Read .env into the environment. Call it first, before the config is built.
 
     A variable that is already set in the shell wins over .env. An empty line such as
     "WANDB_MODE=" counts as unset and is skipped: libraries such as W&B read their variables
     themselves and fail on an empty value.
+
+    Args:
+        path: The file to read. Default: the nearest .env in the current folder or above it.
     """
     for name, value in dotenv_values(path or find_dotenv(usecwd=True)).items():
         if value and name not in os.environ:
@@ -65,11 +68,35 @@ def _env(name: str, default: Any = None) -> Any:
     return os.environ.get(name) or default
 
 
-def register_resolvers() -> None:
-    """Make ${experiment_id:}, ${run_id:} and ${env:NAME,default} usable in the config.
+def env_path(name: str, default: str) -> str:
+    """A folder named by an environment variable, as an absolute path.
 
+    A relative folder is relative to the top folder of the repository, wherever the command
+    is run from. The launchers (scripts/launch/common.sh) follow the same rule.
+
+    Args:
+        name: Name of the environment variable, e.g. "RUNS_DIR".
+        default: Folder to use when the variable is unset or empty.
+
+    Returns:
+        The absolute path as text, because the Hydra config stores text.
+    """
+    path = Path(_env(name, default)).expanduser()
+    return str(path if path.is_absolute() else (gitutil.repo_root() or Path.cwd()) / path)
+
+
+def runs_dir() -> Path:
+    """Where run folders are written: RUNS_DIR, or runs/ in the repository."""
+    return Path(env_path("RUNS_DIR", "runs"))
+
+
+def register_resolvers() -> None:
+    """Make the resolvers of this project usable in the config.
+
+    These are ${experiment_id:}, ${run_id:}, ${env:NAME,default} and ${path:NAME,default}.
     Call this before @hydra.main runs.
     """
     OmegaConf.register_new_resolver("env", _env, replace=True)
+    OmegaConf.register_new_resolver("path", env_path, replace=True)
     OmegaConf.register_new_resolver("experiment_id", _experiment_id, replace=True)
     OmegaConf.register_new_resolver("run_id", _get_run_id, replace=True)

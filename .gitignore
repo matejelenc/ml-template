@@ -17,8 +17,13 @@ data/
 *.ckpt
 *.safetensors
 
+# Built by `make docs`
+docs/api/
+
 # Python
 .venv/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/

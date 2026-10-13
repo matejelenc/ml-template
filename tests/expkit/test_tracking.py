@@ -102,7 +102,9 @@ def test_each_series_has_its_own_step_counter_in_wandb(tmp_path, fake_wandb):
         {"fold_1/step": 1, "fold_1/loss": 0.8, "fold_1/acc": 0.2},
     ]
     assert fake_wandb.run.defined == {
-        "fold_0/loss": "fold_0/step", "fold_1/loss": "fold_1/step", "fold_1/acc": "fold_1/step",
+        "fold_0/loss": "fold_0/step",
+        "fold_1/loss": "fold_1/step",
+        "fold_1/acc": "fold_1/step",
     }
 
 

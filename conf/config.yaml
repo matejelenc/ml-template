@@ -16,9 +16,10 @@ run_id: ${run_id:}
 seed: 0
 
 # Per-server paths come from .env, never from committed config.
+# A relative path is relative to the top folder of the repository.
 paths:
-  runs_dir: ${env:RUNS_DIR,runs}
-  data_dir: ${env:DATA_DIR,data}
+  runs_dir: ${path:RUNS_DIR,runs}
+  data_dir: ${path:DATA_DIR,data}
   run_dir: ${paths.runs_dir}/${experiment_id}/${run_id}
 
 # Weights & Biases. The API key (WANDB_API_KEY) and project name come from .env.

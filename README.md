@@ -54,7 +54,7 @@ On every further server: `git clone`, `uv sync`, `make setup`.
    ```
    Add `--dry-run` to see what would happen without doing it.
 4. Watch it in W&B, or with `make status` and `tail -f <run folder>/output.log`.
-5. When it finishes, it is in the Overleaf journal, below the entry of the day. Open
+5. When it finishes, the run is in the Overleaf journal, below the entry of the day. Open
    `journal.tex` there and fill in `\about{}`, `\relevance{}`, `\hypothesis{}` and
    `\conclusion{}`. One left empty prints nothing.
 
@@ -81,6 +81,7 @@ scripts/experiment.py         example entry point: copy it for your own scripts
 scripts/launch/               launchers, job wrapper, per-server settings
 src/expkit/                   the bookkeeping library (record, tracking, journal)
 tests/                        one folder per source folder, one file per module
+CONTRIBUTING.md               ways of working: how code is written here
 overleaf_template/            skeletons copied into the Overleaf project by the setup
 overleaf/                     your clone of the Overleaf project (not in git)
 ```
@@ -93,7 +94,7 @@ A run folder is `$RUNS_DIR/<experiment>/<run id>/`:
 | `status.json` | `queued`, `running`, `done`, `failed` or `cancelled`, with a heartbeat time |
 | `config.yaml` | the final config, secrets redacted |
 | `monitor/` | numbers logged during training, one JSON object per step; the local copy of what W&B gets. `main.jsonl`, plus one file per named series |
-| `summary.json` | written at the end: final metrics, duration, weight files with size and SHA-256, journal files |
+| `summary.json` | written at the end: final metrics, duration, weight files with size and SHA-256 |
 | `output.log`, `job.sh` | everything the job printed, errors included, and the exact job script |
 | `journal/` | what you select for the Overleaf journal: figures, tables and LaTeX files, subfolders included (see Overleaf below) |
 | `eval/` | everything else from evaluation (predictions, statistics, further plots); organized as you like, never read by the code |
@@ -137,13 +138,19 @@ is meant for quick debugging.
 |---|---|
 | `make setup` | write `.env`, connect Overleaf |
 | `make status` | list runs and their state; `lost` means the job died without notice |
-| `make journal EXP=012-lora` | push the journal entry again |
+| `make journal EXP=012-lora` | push the journal entry of the newest finished run again (`RUN=<run id>` for another one) |
 | `make journal EXP=012-lora OUT=folder` | write the entry to a folder, to upload by hand |
 | `make test` | run the tests |
+| `make format` | format the code and apply safe automatic fixes |
+| `make check` | run before a commit: formatting, lint rules, type hints, tests |
+| `make docs` | build the reference pages of `src/` from the docstrings into `docs/api/` |
 
 The tests mirror the code: `src/expkit/record.py` is tested in `tests/expkit/test_record.py`,
 `scripts/setup.py` in `tests/scripts/test_setup.py`. Tests for your own package go in
 `tests/<package>/`. Run one part with `uv run pytest tests/<package>`.
+
+How to change the code (type hints, docstrings, tests, commits) is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Useful overrides: `wandb.mode=disabled` or `offline`, `journal.export=false`.
 After an offline run: `uv run wandb sync <run folder>/wandb/offline-run-*`.
@@ -162,7 +169,7 @@ After an offline run: `uv run wandb sync <run folder>/wandb/offline-run-*`.
   use the new name as the option. A style defines seven colours and seven commands, listed
   at the end of `macros.sty`; the macros you write in the documents stay the same. The next
   export copies the new file to Overleaf.
-- The code writes only `generated/` and adds one stub per experiment to `journal.tex`.
+- The code writes only `generated/` and adds one stub per run to `journal.tex`.
   Everything else is yours.
 - Edit in the browser, not in the local `overleaf/` folder: the export refuses to run when
   that folder has local changes.
@@ -181,9 +188,12 @@ Anything you want to write down.
 
 Write the date out. `\today` would not work: it changes every time the document is compiled.
 
-An experiment is added when its first run finishes, at the end of the entry of that day.
-The entry is created if it does not exist yet. Each experiment shows, in this order: a block
-that identifies the run, the results, and your notes.
+Every run that finishes is added at the end of the entry of that day, and the entry is
+created if it does not exist yet. Three seeds of one experiment give three subentries, each
+with its run ID. Nothing is overwritten: the files of a run are in
+`generated/<experiment>/<run id>/`. To drop a broken run, delete its lines from `journal.tex`
+in Overleaf. Each subentry shows, in this order: a block that identifies the run, the
+results, and your notes.
 
 The results come from the `journal/` folder of the run, in the order of the file names
 (prefix them with `01-`, `02-` to choose the order):
@@ -206,7 +216,7 @@ text, right after the paragraph they belong to:
 \question{A question.}
 \question[Ana]{A question for one supervisor.}
 \issue{A problem with the setup that cannot be solved right now.}
-\expentry{012-lora}    % the generated block and results of an experiment
+\expentry{012-lora/20261013-101500-a3f1}    % facts and results of one run
 ```
 
 ## Secrets

@@ -15,6 +15,7 @@ from expkit.config import load_env
 
 
 def main() -> int:
+    """Read the command line and export one run. Returns the exit code."""
     parser = argparse.ArgumentParser(description="Export a journal entry to Overleaf.")
     parser.add_argument("experiment", help="experiment ID, e.g. 012-lora")
     parser.add_argument("--run", help="run ID (default: the newest finished run)")

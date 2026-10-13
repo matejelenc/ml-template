@@ -1,27 +1,31 @@
 """Git helpers. Every function returns None instead of raising when git is unavailable."""
 
-from __future__ import annotations
-
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any
 
-PathLike = Union[str, Path]
+PathLike = str | Path
 
 
-def git(*args: str, cwd: Optional[PathLike] = None) -> Optional[str]:
-    """Run a git command and return its output, or None if it failed."""
+def git(*args: str, cwd: PathLike | None = None) -> str | None:
+    """Run a git command.
+
+    Args:
+        *args: The arguments after "git", e.g. "rev-parse", "HEAD".
+        cwd: Folder to run in. Default: the current folder.
+
+    Returns:
+        What the command printed, or None if it failed or git is not installed.
+    """
     try:
-        result = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-        )
+        result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
     except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.strip()
 
 
-def repo_root(cwd: Optional[PathLike] = None) -> Optional[Path]:
+def repo_root(cwd: PathLike | None = None) -> Path | None:
     """Top folder of the git repository, or None outside a repository."""
     root = git("rev-parse", "--show-toplevel", cwd=cwd)
     return Path(root) if root else None
@@ -32,8 +36,17 @@ def experiment_tag(experiment_id: str) -> str:
     return f"exp/{experiment_id}"
 
 
-def info(experiment_id: str, cwd: Optional[PathLike] = None) -> dict:
-    """Which code a run used: commit, experiment tag, repository URL, uncommitted changes."""
+def info(experiment_id: str, cwd: PathLike | None = None) -> dict[str, Any]:
+    """Which code a run used.
+
+    Args:
+        experiment_id: The experiment, e.g. "012-lora". Its tag is looked up.
+        cwd: A folder inside the repository. Default: the current folder.
+
+    Returns:
+        A dict with "sha", "tag" (None unless the tag is on the running commit), "repo_url"
+        and "dirty" (True with uncommitted changes). Every value is None outside a repository.
+    """
     status = git("status", "--porcelain", cwd=cwd)
     # The tag counts only if it sits on the commit that is running.
     tag = git("tag", "--points-at", "HEAD", "--list", experiment_tag(experiment_id), cwd=cwd)

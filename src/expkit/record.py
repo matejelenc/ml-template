@@ -1,6 +1,6 @@
 """The run record: the files that document one run.
 
-A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
+A run folder is `$RUNS_DIR/<experiment_id>/<run_id>/` and contains:
 
     run.json               where the run came from (code, machine, command), written at start
     config.yaml            the final merged config, secrets redacted
@@ -8,7 +8,7 @@ A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
                            {"step": 100, "loss": 0.42}. Everything is in monitor/main.jsonl
                            unless a series is named: run.monitor(..., series="model_a/fold_0")
                            writes monitor/model_a/fold_0.jsonl
-    summary.json           final metrics, weight files and journal files, written at the end
+    summary.json           final metrics and weight files, written at the end
     journal/               the figures and tables that go into the Overleaf journal (small,
                            a selection; subfolders allowed)
     eval/                  everything else from evaluation: predictions, targets, statistics,
@@ -26,8 +26,6 @@ Use it from training code like this:
     run.finish(metrics={"loss": 0.01})
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import logging
@@ -39,34 +37,30 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from expkit import gitutil
-from expkit.redact import redact
+from expkit.redact import redact, redact_config
 
 log = logging.getLogger(__name__)
 
 # Raise this number whenever a field is renamed, removed or changes meaning.
 SCHEMA_VERSION = 1
 
-# Config keys that are not experiment settings: they can differ between two runs of the same
-# experiment. Left out of config_sha256 and of the config diff in journal entries.
-# The series that run.log writes to when none is named.
+# The series that run.monitor writes to when none is named.
 MAIN_SERIES = "main"
 # A series is a name or a path of names: "fold_0", "model_a/fold_0".
 _SERIES_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$")
 
-NOT_SETTINGS = ("experiment_id", "run_id", "paths", "wandb", "journal")
-
 
 def utc_now() -> str:
     """Current time in UTC, e.g. "2026-10-12T18:00:30Z"."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def sha256_file(path: Path) -> str:
@@ -78,30 +72,25 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def write_json(path: Path, data: dict) -> None:
+def write_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON through a temporary file, so a crash never leaves a half-written file."""
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(data, indent=2) + "\n")
     os.replace(temporary, path)
 
 
-def config_hash(config: dict) -> str:
-    """SHA-256 of the settings. Equal for two runs with the same settings, on any server."""
-    settings = {key: value for key, value in config.items() if key not in NOT_SETTINGS}
-    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
-
-
-def _gpu_info() -> dict:
+def _gpu_info() -> dict[str, Any]:
     """GPU names, driver and CUDA version from nvidia-smi. Empty values without a GPU."""
-    info: Dict[str, Any] = {"cuda": None, "gpu_driver": None, "gpus": []}
+    info: dict[str, Any] = {"cuda": None, "gpu_driver": None, "gpus": []}
     try:
         query = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
-            capture_output=True, text=True, check=True, timeout=30,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
         ).stdout
-        header = subprocess.run(
-            ["nvidia-smi"], capture_output=True, text=True, check=True, timeout=30
-        ).stdout
+        header = subprocess.run(["nvidia-smi"], capture_output=True, text=True, check=True, timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return info
     for line in query.strip().splitlines():
@@ -113,7 +102,7 @@ def _gpu_info() -> dict:
     return info
 
 
-def _environment() -> dict:
+def _environment() -> dict[str, Any]:
     """The machine and software the run used."""
     root = gitutil.repo_root() or Path.cwd()
     lockfile = root / "uv.lock"
@@ -125,16 +114,15 @@ def _environment() -> dict:
     }
 
 
-def _launch() -> dict:
+def _launch() -> dict[str, Any]:
     """How the run was started. The launchers set LAUNCH_SCHEDULER; a direct run has "none"."""
     scheduler = os.environ.get("LAUNCH_SCHEDULER") or "none"
+    job_id: str | None = None
     if os.environ.get("SLURM_JOB_ID"):
         scheduler, job_id = "slurm", os.environ["SLURM_JOB_ID"]
     elif scheduler == "tmux":
         # The tmux session is named after the run ID.
         job_id = os.environ.get("RUN_ID")
-    else:
-        job_id = None
     return {"scheduler": scheduler, "job_id": job_id, "command": shlex.join(sys.argv)}
 
 
@@ -148,7 +136,7 @@ def _plain(value: Any) -> Any:
 class Run:
     """One run folder. Create it with record.start(cfg)."""
 
-    def __init__(self, run_dir: Path):
+    def __init__(self, run_dir: Path) -> None:
         self.dir = run_dir
         self.weights_dir = run_dir / "weights"
         self.journal_dir = run_dir / "journal"
@@ -158,19 +146,30 @@ class Run:
         self.wandb: Any = None
         self._started = time.monotonic()
         # Metric names that W&B has been told the step counter of.
-        self._wandb_metrics: set = set()
+        self._wandb_metrics: set[str] = set()
 
     def monitor(self, step: int, series: str = MAIN_SERIES, **metrics: Any) -> None:
-        """Append one line of numbers to monitor/<series>.jsonl and send them to W&B.
+        """Append one line of numbers to `monitor/<series>.jsonl` and send them to W&B.
 
             run.monitor(step=100, loss=0.42)                      # monitor/main.jsonl
             run.monitor(step=100, series="model_a/fold_0", loss=0.42)  # monitor/model_a/fold_0.jsonl
 
         Each series counts its own steps, so a second model or fold can start again at 0.
         In W&B a series shows up as a name prefix: "model_a/fold_0/loss".
+
+        Args:
+            step: Training step the numbers belong to.
+            series: Name of the model or fold, with "/" between levels.
+            **metrics: The numbers to log, by name. NumPy and PyTorch scalars are accepted.
+
+        Raises:
+            ValueError: If the series name contains characters other than letters, digits,
+                "-", "_", "." and "/".
         """
         if not _SERIES_NAME.match(series):
-            raise ValueError(f"Bad series name {series!r}: use letters, digits, - and _, with / between levels.")
+            raise ValueError(
+                f"Bad series name {series!r}: use letters, digits, - and _, with / between levels."
+            )
         path = self.monitor_dir / f"{series}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a") as file:
@@ -189,14 +188,25 @@ class Run:
         self._wandb("log", {step_name: step, **{prefix + name: value for name, value in metrics.items()}})
 
     def update(self, **fields: Any) -> None:
-        """Add or change fields in run.json, e.g. run.update(wandb_url=...)."""
+        """Add or change fields in run.json, e.g. run.update(wandb_url=...).
+
+        Args:
+            **fields: Top-level fields of run.json and their new values. Secrets are redacted.
+        """
         path = self.dir / "run.json"
         write_json(path, redact({**json.loads(path.read_text()), **fields}))
 
-    def finish(self, metrics: Optional[Dict[str, Any]] = None) -> dict:
-        """Write summary.json: final metrics, every file in weights/ and journal/.
+    def finish(self, metrics: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Write summary.json: final metrics and every file in weights/.
 
         Also closes the W&B run when tracking is on.
+
+        Args:
+            metrics: A handful of headline numbers, by name. Larger results belong in
+                journal/ or eval/ as files.
+
+        Returns:
+            The content of summary.json.
         """
         summary = {
             "schema_version": SCHEMA_VERSION,
@@ -211,7 +221,6 @@ class Run:
                 }
                 for path in _files(self.weights_dir)
             ],
-            "journal": [str(path.relative_to(self.dir)) for path in _files(self.journal_dir)],
         }
         write_json(self.dir / "summary.json", summary)
         self._wandb("log", {f"final/{name}": value for name, value in summary["metrics"].items()})
@@ -229,12 +238,12 @@ class Run:
             self.wandb = None
 
 
-def _write_config(path: Path, config: dict) -> None:
+def _write_config(path: Path, config: dict[str, Any]) -> None:
     with open(path, "w") as file:
         yaml.safe_dump({"schema_version": SCHEMA_VERSION, "config": config}, file, sort_keys=False)
 
 
-def _files(folder: Path) -> List[Path]:
+def _files(folder: Path) -> list[Path]:
     """All files below a folder, sorted, so the listing is the same every time."""
     return sorted(path for path in folder.rglob("*") if path.is_file())
 
@@ -242,7 +251,12 @@ def _files(folder: Path) -> List[Path]:
 def start(cfg: DictConfig) -> Run:
     """Create the run folder and write run.json and config.yaml.
 
-    Uses cfg.paths.run_dir, cfg.experiment_id and cfg.run_id from the base config.
+    Args:
+        cfg: The Hydra config of the run. Uses cfg.paths.run_dir, cfg.experiment_id and
+            cfg.run_id from the base config.
+
+    Returns:
+        The run record. Log to it with run.monitor(...) and close it with run.finish(...).
     """
     run = Run(Path(cfg.paths.run_dir).resolve())
     run.weights_dir.mkdir(parents=True, exist_ok=True)
@@ -250,8 +264,7 @@ def start(cfg: DictConfig) -> Run:
     run.eval_dir.mkdir(parents=True, exist_ok=True)
     run.monitor_dir.mkdir(parents=True, exist_ok=True)
 
-    config = redact(OmegaConf.to_container(cfg, resolve=True))
-    _write_config(run.dir / "config.yaml", config)
+    _write_config(run.dir / "config.yaml", redact_config(cfg))
 
     run_info = {
         "schema_version": SCHEMA_VERSION,
@@ -266,7 +279,6 @@ def start(cfg: DictConfig) -> Run:
         },
         "environment": _environment(),
         "launch": _launch(),
-        "config_sha256": config_hash(config),
         "wandb_url": None,
     }
     write_json(run.dir / "run.json", redact(run_info))

@@ -2,20 +2,29 @@
 name = "ml-template"
 version = "0.1.0"
 description = "Starting point for ML research projects: config, run records, launchers, journal export."
-# Wide on purpose. Narrow this in a project if one of its packages needs a specific Python.
-requires-python = ">=3.9"
+# uv installs this Python itself, so it does not depend on what a server has. .python-version
+# names the version that is used; raise both together.
+requires-python = ">=3.12"
 dependencies = [
-    # Loose range: uv picks whichever Hydra fits the project's Python and other packages.
     # Behaviour is pinned in scripts/experiment.py with version_base="1.2".
-    "hydra-core>=1.2,<2",
-    # Loads per-server settings and secrets from .env.
+    "hydra-core>=1.3.2,<2",
+    # Figures for the journal.
     "matplotlib>=3.5",
+    # Loads per-server settings and secrets from .env.
     "python-dotenv>=1.0",
     "wandb>=0.16",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+# pytest runs the tests, ruff formats and lints, mypy checks the type hints, pdoc builds the
+# reference documentation. `make check` and `make docs` use them. See CONTRIBUTING.md.
+dev = [
+    "mypy>=1.10",
+    "pdoc>=14",
+    "pytest>=8",
+    "ruff>=0.6",
+    "types-pyyaml>=6.0.12.20250915",
+]
 
 # Makes `import expkit` work after `uv sync`.
 [build-system]
@@ -29,3 +38,40 @@ packages = ["src/expkit"]
 testpaths = ["tests"]
 # Lets two test files in different folders share a name (tests/expkit/test_config.py, ...).
 addopts = "--import-mode=importlib"
+
+# --- Code checks, run by `make check`. The rules are explained in CONTRIBUTING.md. ---
+
+[tool.ruff]
+line-length = 110
+# The same version as requires-python above.
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "F",  # plain errors: unused imports, undefined names, ...
+    "I",       # sorted imports
+    "B",       # likely bugs
+    "UP",      # outdated syntax
+    "D",       # docstrings
+    "ANN",     # type hints on every function
+]
+ignore = [
+    "D105", "D107",  # no docstring needed on __init__ and other special methods
+    "ANN401",        # Any is allowed where a library gives us nothing better
+    "UP031",         # % formatting stays: LaTeX text is full of { and }
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# A test is documented by its name, and its arguments are fixtures.
+"tests/**" = ["D101", "D102", "D103", "ANN"]
+
+[tool.mypy]
+files = ["src", "scripts"]
+# Every function has type hints on all arguments and on the return value.
+disallow_untyped_defs = true
+# list[str], not a bare list.
+disallow_any_generics = true
+warn_unused_ignores = true

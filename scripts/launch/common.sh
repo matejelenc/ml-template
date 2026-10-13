@@ -134,7 +134,7 @@ make_job_script() {
     RUN_ID="$(date +%Y%m%d-%H%M%S)-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
     runs_dir="$(setting RUNS_DIR)"
     runs_dir="${runs_dir:-runs}"
-    # A relative RUNS_DIR is relative to the repository.
+    # A relative RUNS_DIR is relative to the repository (same rule as expkit.config.env_path).
     case "$runs_dir" in /*) ;; *) runs_dir="$REPO/$runs_dir" ;; esac
     RUN_DIR="$runs_dir/${EXPERIMENT_ID:-scratch}/$RUN_ID"
 

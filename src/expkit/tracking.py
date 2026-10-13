@@ -4,6 +4,7 @@
     tracking.start(cfg, run)   # from here on, run.monitor(...) also sends to W&B
 
 Modes, set with wandb.mode in the config or WANDB_MODE in the environment:
+
     online     live curves at wandb.ai
     offline    for nodes without internet; upload later with: wandb sync <run folder>/wandb/offline-run-*
     disabled   no W&B at all
@@ -12,24 +13,29 @@ Log metrics and plots only. Never log samples, images or other raw data from res
 or licensed datasets.
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any, Optional
+from typing import Any
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from expkit.record import Run
-from expkit.redact import redact
+from expkit.redact import redact_config
 
 log = logging.getLogger(__name__)
 
 
-def start(cfg: DictConfig, run: Run) -> Optional[Any]:
-    """Start a W&B run and attach it to the run record. Returns None if W&B is off or failed.
+def start(cfg: DictConfig, run: Run) -> Any | None:
+    """Start a W&B run and attach it to the run record.
 
     A W&B problem (no internet, wrong key) must not stop training, so it only logs a warning.
     The local run record is complete either way.
+
+    Args:
+        cfg: The Hydra config of the run. Uses cfg.wandb, cfg.experiment_id and cfg.run_id.
+        run: The run record. From here on, run.monitor(...) also sends to W&B.
+
+    Returns:
+        The W&B run, or None if W&B is disabled or could not start.
     """
     if cfg.wandb.mode == "disabled":
         return None
@@ -44,7 +50,7 @@ def start(cfg: DictConfig, run: Run) -> Optional[Any]:
             id=cfg.run_id,
             name=f"{cfg.experiment_id}/{cfg.run_id}",
             group=cfg.experiment_id,
-            config=redact(OmegaConf.to_container(cfg, resolve=True)),
+            config=redact_config(cfg),
             # W&B's own files go inside the run folder, not into the repo.
             dir=str(run.dir),
         )

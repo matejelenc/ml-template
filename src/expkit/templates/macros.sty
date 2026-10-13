@@ -98,10 +98,11 @@
 \newcommand{\issue}[1]{%
   \refstepcounter{issue}\exp@block{issuecolor}{Issue}{\theissue}{}{#1}}
 
-% \expentry{012-lora}   the generated part of an experiment: facts and results
+% \expentry{012-lora/20261013-101500-a3f1}   the generated part of one run: facts and
+%                                            results. The run ID is shown in the journal.
 \newcommand{\expentry}[1]{\input{generated/#1/entry}}
 
-% --- Macros used only by generated entries (generated/<experiment>/entry.tex) ----
+% --- Macros used only by generated entries (generated/<experiment>/<run>/entry.tex)
 
 % Facts that identify the run:
 %   \begin{expinfo} \expfact{Duration}{3m 05s} \expcode{Run}{20260101-120000-abcd} \end{expinfo}
@@ -128,7 +129,7 @@
   \end{tabular}\end{center}}
 \newcommand{\expmetric}[2]{\texttt{#1} & #2 \\}
 
-% \expfigure{generated/012-lora/loss.pdf}{caption}
+% \expfigure{generated/012-lora/<run>/loss.pdf}{caption}
 \newcommand{\expfigure}[2]{%
   \par\medskip\noindent
   \begin{minipage}{\linewidth}\centering
@@ -148,7 +149,7 @@
 \newcommand{\exphead}[1]{#1 \\ \midrule}
 \newcommand{\exprow}[1]{#1 \\}
 
-% \exptex{generated/012-lora/results}   your own .tex file, included as it is
+% \exptex{generated/012-lora/<run>/results}   your own .tex file, included as it is
 \newcommand{\exptex}[1]{\par\medskip{\centering\input{#1}\par}\medskip}
 
 % \expskipped{file name}{reason}

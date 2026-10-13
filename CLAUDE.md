@@ -40,17 +40,11 @@ Safe without asking: `--dry-run` launches, `make test`, `make status`, and local
 
 ## Code
 
-- The user is a researcher, not a software engineer: small modules, few dependencies,
-  clear comments, plain names.
-- Supported: Python 3.9+ and Hydra 1.2+. Check both before finishing a change:
-  `make test` and
-  `uv run --isolated --python 3.9 --with 'hydra-core==1.2.0' pytest -q`
-- Tests mirror the code: `src/<package>/<module>.py` is tested in
-  `tests/<package>/test_<module>.py`, and `scripts/<name>.py` in `tests/scripts/test_<name>.py`.
-  Each test file starts with a one-line docstring saying what it covers.
-- `scripts/launch/job_wrapper.sh` must stay independent of Python and `expkit`.
-- The journal export and W&B must never make a job fail.
-- LaTeX: `src/expkit/templates/macros.sty` defines which macros exist, the files in
-  `templates/styles/` define how they look (every style defines the same commands, listed
-  at the end of `macros.sty`). Generated entries contain
-  macro calls, not formatting.
+How code is written here (type hints, Google-style docstrings, tests, commits, and the rules
+of the template code) is in `CONTRIBUTING.md`, included below. Follow it, and run
+`make check` before you call a change finished.
+
+The user is a researcher, not a software engineer: small modules, few dependencies, clear
+comments, plain names.
+
+@CONTRIBUTING.md

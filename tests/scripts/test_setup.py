@@ -48,10 +48,15 @@ def overleaf(tmp_path):
 
 def run_setup(project, answers):
     """Answer the questions in order: W&B key, W&B project, Overleaf URL, token, runs, data, profile."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith(("OVERLEAF_", "WANDB_"))}
-    return subprocess.run([sys.executable, "scripts/setup.py"], cwd=project, env=env,
-                          input="\n".join(answers) + "\n", capture_output=True, text=True)
+    env = {name: value for name, value in os.environ.items() if not name.startswith(("OVERLEAF_", "WANDB_"))}
+    return subprocess.run(
+        [sys.executable, "scripts/setup.py"],
+        cwd=project,
+        env=env,
+        input="\n".join(answers) + "\n",
+        capture_output=True,
+        text=True,
+    )
 
 
 def env_lines(project):
@@ -61,8 +66,9 @@ def env_lines(project):
 
 
 def test_first_setup_writes_env_and_fills_the_overleaf_project(project, overleaf):
-    result = run_setup(project, ["wandb-key-123456", "", f"git clone {overleaf} folder", TOKEN,
-                                 "/big/runs", "", "hpc-gpu"])
+    result = run_setup(
+        project, ["wandb-key-123456", "", f"git clone {overleaf} folder", TOKEN, "/big/runs", "", "hpc-gpu"]
+    )
     assert result.returncode == 0, result.stderr
     # Same order and sections as .env.example: settings first, secrets last.
     assert env_lines(project) == [
@@ -82,7 +88,11 @@ def test_first_setup_writes_env_and_fills_the_overleaf_project(project, overleaf
 
     files = git(overleaf, "ls-tree", "-r", "--name-only", "main").splitlines()
     assert [name for name in files if "/styles/" not in name] == [
-        "generated/macros.sty", "journal.tex", "main.tex", "report.tex"]
+        "generated/macros.sty",
+        "journal.tex",
+        "main.tex",
+        "report.tex",
+    ]
     assert "generated/styles/default.sty" in files
     assert git(overleaf, "show", "main:main.tex") == "the paper"  # untouched
 

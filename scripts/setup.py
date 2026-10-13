@@ -2,17 +2,19 @@
 
     uv run python scripts/setup.py
 
-It asks for the settings, writes them to .env (a copy of .env.example, readable only by you), clones the Overleaf
-project into overleaf/ and adds the journal and report skeletons to it if they are missing.
+It asks for the settings, writes them to .env (a copy of .env.example, readable only by
+you), clones the Overleaf project into overleaf/ and adds the journal and report skeletons
+to it if they are missing.
 Press Enter to keep a value shown in [brackets]. README.md lists the same steps by hand.
 """
 
 import getpass
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from dotenv import dotenv_values
 
 from expkit import journal
 
@@ -25,34 +27,23 @@ TEMPLATE_DIR = ROOT / "overleaf_template"
 QUESTIONS = [
     ("WANDB_API_KEY", "W&B API key (wandb.ai/authorize)", True),
     ("WANDB_PROJECT", "W&B project name", False),
-    ("OVERLEAF_GIT_URL", "Overleaf git URL (Menu > Git in the Overleaf project; empty to skip Overleaf)", False),
+    (
+        "OVERLEAF_GIT_URL",
+        "Overleaf git URL (Menu > Git in the Overleaf project; empty to skip Overleaf)",
+        False,
+    ),
     ("OVERLEAF_TOKEN", "Overleaf git token (Account settings > Git integration)", True),
     ("RUNS_DIR", "Folder for run outputs on this machine (empty for runs/ in the repo)", False),
     ("DATA_DIR", "Folder with datasets on this machine (empty for data/ in the repo)", False),
-    ("LAUNCH_PROFILE", "Default launcher settings, a file name in scripts/launch/servers/ without .sh (empty for none)", False),
+    (
+        "LAUNCH_PROFILE",
+        "Default launcher settings, a file name in scripts/launch/servers/ without .sh (empty for none)",
+        False,
+    ),
 ]
 
-# Stored in the Overleaf clone's own git config. Git runs it when it needs the password and
-# it reads the token from .env, so the token exists in one file only.
-CLONE_CREDENTIAL_HELPER = (
-    '!f() { test "$1" = get || exit 0; echo username=git; '
-    'echo "password=$(grep -m1 "^OVERLEAF_TOKEN=" "$(git rev-parse --show-toplevel)/../.env" '
-    "| cut -d= -f2- | tr -d \"\\\"\\r'\")\"; }; f"
-)
 
-
-def read_env(path: Path) -> dict:
-    """KEY=VALUE lines of .env as a dict. Comments and blank lines are ignored."""
-    values = {}
-    if path.is_file():
-        for line in path.read_text().splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                name, value = line.split("=", 1)
-                values[name.strip()] = value.strip().strip("\"'")
-    return values
-
-
-def write_env(path: Path, values: dict, template: Path = ENV_EXAMPLE) -> None:
+def write_env(path: Path, values: dict[str, str], template: Path = ENV_EXAMPLE) -> None:
     """Update .env: change the given keys, keep every other line, permissions 600.
 
     A new .env starts as a copy of the template, so it has the same sections and comments.
@@ -99,7 +90,7 @@ def clean_overleaf_url(url: str) -> str:
     return url.strip()
 
 
-def setup_overleaf(values: dict) -> None:
+def setup_overleaf(values: dict[str, str]) -> None:
     """Clone the Overleaf project and add the skeleton files that are missing."""
     if not values.get("OVERLEAF_GIT_URL"):
         print("Overleaf: skipped (no git URL). Journal entries can still be written to a folder:")
@@ -110,10 +101,6 @@ def setup_overleaf(values: dict) -> None:
     clone = ROOT / "overleaf"
 
     journal._ensure_clone(clone)
-    subprocess.run(["git", "config", "--local", "--replace-all", "credential.helper", ""],
-                   cwd=clone, check=True)
-    subprocess.run(["git", "config", "--local", "--add", "credential.helper", CLONE_CREDENTIAL_HELPER],
-                   cwd=clone, check=True)
     if journal._git(clone, "status", "--porcelain").stdout.strip():
         print(f"Overleaf: {clone} has local changes, left as it is. Check: git -C overleaf status")
         return
@@ -136,8 +123,10 @@ def setup_overleaf(values: dict) -> None:
 
 
 def main() -> int:
+    """Ask the questions, write .env and set up Overleaf. Returns the exit code."""
     print(f"Setting up {ROOT}\n")
-    current = read_env(ENV_FILE)
+    # The same reader as expkit.config.load_env, so both understand .env the same way.
+    current = {name: value or "" for name, value in dotenv_values(ENV_FILE).items()}
     defaults = {"WANDB_PROJECT": ROOT.name}
     # Names of the variables that expkit.redact removes from everything it writes.
     values = {"SECRETS": secrets_list(current.get("SECRETS", ""))}
@@ -151,8 +140,7 @@ def main() -> int:
         setup_overleaf(values)
     except journal.SyncError as error:
         print(f"Overleaf: failed: {error}", file=sys.stderr)
-        print("Fix the URL or token and run this script again. Everything else is set up.",
-              file=sys.stderr)
+        print("Fix the URL or token and run this script again. Everything else is set up.", file=sys.stderr)
         return 1
     print("\nDone. Try it: uv run python scripts/experiment.py wandb.mode=disabled")
     return 0

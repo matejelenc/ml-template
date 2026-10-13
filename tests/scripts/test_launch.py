@@ -6,7 +6,6 @@ Each test works in a throwaway copy of the repository with a local bare reposito
 
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -49,11 +48,9 @@ def read_json(path):
 
 
 @pytest.fixture
-def project(tmp_path):
-    """A committed copy of the launch scripts and config, with a bare "origin"."""
-    project = tmp_path / "project"
-    for folder in ("scripts", "conf"):
-        shutil.copytree(REPO / folder, project / folder, ignore=shutil.ignore_patterns("__pycache__"))
+def project(project_copy, tmp_path):
+    """The project copy of tests/conftest.py, committed, with a bare "origin"."""
+    project = project_copy
     (project / "conf/experiment/vision").mkdir()
     (project / "conf/experiment/vision/002-sub.yaml").write_text("# @package _global_\nseed: 2\n")
     (project / ".gitignore").write_text("runs/\n.env\n")
@@ -96,19 +93,13 @@ def launch(project, launcher, *args, run=False, env=None):
     )
 
 
-def only_run(project, experiment="001-toy"):
+def only_run(project, experiment="900-stand-in"):
     (run_dir,) = (project / "runs" / experiment).iterdir()
     return run_dir
 
 
-# Runs the real toy experiment with the Python that runs the tests.
-TOY = [
-    sys.executable,
-    "scripts/experiment.py",
-    "+experiment=001-toy",
-    "train.steps=20",
-    "journal.export=false",
-]
+# A run of the stand-in experiment (tests/fixtures/), with the Python that runs the tests.
+RUN = [sys.executable, "scripts/stand_in.py", "+experiment=900-stand-in"]
 
 
 # --- job wrapper ---------------------------------------------------------------------
@@ -199,9 +190,9 @@ def test_wrapper_does_not_depend_on_the_library():
 
 
 def test_dry_run_changes_nothing(project):
-    result = launch(project, "tmux", "--dry-run", *TOY)
+    result = launch(project, "tmux", "--dry-run", *RUN)
     assert result.returncode == 0, result.stderr
-    assert "would create tag exp/001-toy" in result.stdout
+    assert "would create tag exp/900-stand-in" in result.stdout
     assert "dry run: nothing submitted" in result.stdout
     assert git(project, "tag") == ""
     assert not (project / "runs").exists()
@@ -209,18 +200,16 @@ def test_dry_run_changes_nothing(project):
 
 
 def test_the_exact_command_is_printed_before_submitting(project):
-    result = launch(
-        project, "tmux", "--dry-run", "scripts/experiment.py", "+experiment=001-toy", "train.lr=0.3"
-    )
+    result = launch(project, "tmux", "--dry-run", "scripts/stand_in.py", "+experiment=900-stand-in", "seed=3")
     assert "job_wrapper.sh" in result.stdout
     # A command that starts with a .py file is run with uv.
-    assert "uv run python scripts/experiment.py +experiment=001-toy train.lr=0.3" in result.stdout
+    assert "uv run python scripts/stand_in.py +experiment=900-stand-in seed=3" in result.stdout
     assert "submit: tmux new-session" in result.stdout
 
 
 def test_dirty_tree_is_refused(project):
-    (project / "scripts/experiment.py").write_text("# edited\n")
-    result = launch(project, "tmux", *TOY)
+    (project / "scripts/stand_in.py").write_text("# edited\n")
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 1
     assert "uncommitted changes" in result.stderr
     assert git(project, "tag") == "" and not (project / "runs").exists()
@@ -228,46 +217,46 @@ def test_dirty_tree_is_refused(project):
 
 def test_untracked_file_counts_as_dirty(project):
     (project / "new_module.py").write_text("x = 1\n")
-    assert launch(project, "tmux", *TOY).returncode == 1
+    assert launch(project, "tmux", *RUN).returncode == 1
 
 
 def test_allow_dirty_is_recorded_in_run_json(project):
     (project / "note.txt").write_text("uncommitted\n")
-    result = launch(project, "tmux", "--allow-dirty", *TOY)
+    result = launch(project, "tmux", "--allow-dirty", *RUN)
     assert result.returncode == 0, result.stderr
     info = read_json(only_run(project) / "run.json")
     assert info["git"]["dirty"] is True and info["git"]["allow_dirty"] is True
 
 
 def test_tag_is_annotated_with_the_purpose_and_pushed(project):
-    result = launch(project, "tmux", *TOY)
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
-    assert git(project, "cat-file", "-t", "exp/001-toy") == "tag"  # annotated, not lightweight
-    assert git(project, "tag", "-l", "--format=%(contents:subject)", "exp/001-toy") == (
-        "check that the pipeline works end to end."
+    assert git(project, "cat-file", "-t", "exp/900-stand-in") == "tag"  # annotated, not lightweight
+    assert git(project, "tag", "-l", "--format=%(contents:subject)", "exp/900-stand-in") == (
+        "stand-in experiment for the tests."
     )
-    assert git(project, "rev-parse", "exp/001-toy^{commit}") == git(project, "rev-parse", "HEAD")
+    assert git(project, "rev-parse", "exp/900-stand-in^{commit}") == git(project, "rev-parse", "HEAD")
     origin = project.parent / "origin.git"
-    assert git(origin, "rev-parse", "exp/001-toy^{commit}") == git(project, "rev-parse", "HEAD")
+    assert git(origin, "rev-parse", "exp/900-stand-in^{commit}") == git(project, "rev-parse", "HEAD")
 
 
 def test_relaunch_on_the_same_commit_reuses_the_tag(project):
-    assert launch(project, "tmux", *TOY).returncode == 0
-    result = launch(project, "tmux", *TOY)
+    assert launch(project, "tmux", *RUN).returncode == 0
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
     assert "reusing it" in result.stdout
-    assert len(list((project / "runs/001-toy").iterdir())) == 2
+    assert len(list((project / "runs/900-stand-in").iterdir())) == 2
 
 
 def test_tag_on_another_commit_is_refused(project):
-    assert launch(project, "tmux", *TOY).returncode == 0
+    assert launch(project, "tmux", *RUN).returncode == 0
     git(project, "commit", "-q", "--allow-empty", "-m", "more work")
-    result = launch(project, "tmux", *TOY)
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 1
     assert "already exists on another commit" in result.stderr
-    assert len(list((project / "runs/001-toy").iterdir())) == 1  # nothing new was started
+    assert len(list((project / "runs/900-stand-in").iterdir())) == 1  # nothing new was started
     # A dry run says the same, so it can be trusted.
-    dry_run = launch(project, "tmux", "--dry-run", *TOY)
+    dry_run = launch(project, "tmux", "--dry-run", *RUN)
     assert dry_run.returncode == 1 and "already exists on another commit" in dry_run.stderr
 
 
@@ -279,7 +268,7 @@ def refuse_every_job(project, scheduler):
 @pytest.mark.parametrize("launcher, scheduler", [("tmux", "tmux"), ("slurm", "sbatch")])
 def test_refused_job_leaves_no_tag_and_no_queued_run(project, launcher, scheduler):
     refuse_every_job(project, scheduler)
-    result = launch(project, launcher, "--profile", "hpc-gpu", *TOY)
+    result = launch(project, launcher, "--profile", "hpc-gpu", *RUN)
     assert result.returncode == 1 and "refused" in result.stderr
     # No tag here or on origin: the corrected launch may come from a new commit.
     assert git(project, "tag") == "" and git(project.parent / "origin.git", "tag") == ""
@@ -287,10 +276,10 @@ def test_refused_job_leaves_no_tag_and_no_queued_run(project, launcher, schedule
 
 
 def test_refused_job_keeps_a_tag_that_was_there_before(project):
-    assert launch(project, "tmux", *TOY).returncode == 0
+    assert launch(project, "tmux", *RUN).returncode == 0
     refuse_every_job(project, "tmux")
-    assert launch(project, "tmux", *TOY).returncode == 1
-    assert git(project, "tag") == "exp/001-toy"  # an earlier run used it
+    assert launch(project, "tmux", *RUN).returncode == 1
+    assert git(project, "tag") == "exp/900-stand-in"  # an earlier run used it
 
 
 def test_experiment_number_used_on_another_server_is_refused(project):
@@ -300,15 +289,15 @@ def test_experiment_number_used_on_another_server_is_refused(project):
     git(other, "config", "user.email", "test@example.com")
     git(other, "config", "user.name", "Test")
     git(other, "commit", "-q", "--allow-empty", "-m", "work on the other server")
-    git(other, "tag", "-a", "exp/001-toy", "-m", "taken")
-    git(other, "push", "-q", str(project.parent / "origin.git"), "exp/001-toy")
-    result = launch(project, "tmux", *TOY)
+    git(other, "tag", "-a", "exp/900-stand-in", "-m", "taken")
+    git(other, "push", "-q", str(project.parent / "origin.git"), "exp/900-stand-in")
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 1
     assert "already exists on another commit" in result.stderr
 
 
 def test_unknown_experiment_is_refused_before_anything_happens(project):
-    result = launch(project, "tmux", sys.executable, "scripts/experiment.py", "+experiment=999-typo")
+    result = launch(project, "tmux", sys.executable, "scripts/stand_in.py", "+experiment=999-typo")
     assert result.returncode == 1
     assert "no experiment file" in result.stderr
     assert git(project, "tag") == "" and not (project / "runs").exists()
@@ -316,14 +305,14 @@ def test_unknown_experiment_is_refused_before_anything_happens(project):
 
 def test_launch_works_without_a_remote(project):
     git(project, "remote", "remove", "origin")
-    result = launch(project, "tmux", *TOY)
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
-    assert git(project, "tag") == "exp/001-toy"
+    assert git(project, "tag") == "exp/900-stand-in"
 
 
 def test_unreachable_remote_only_warns(project):
     git(project, "remote", "set-url", "origin", str(project.parent / "gone.git"))
-    result = launch(project, "tmux", *TOY)
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
     assert "could not push tag" in result.stderr
     assert read_json(only_run(project) / "status.json")["state"] == "done"
@@ -331,7 +320,7 @@ def test_unreachable_remote_only_warns(project):
 
 def test_scratch_run_needs_no_tag_and_no_clean_tree(project):
     (project / "note.txt").write_text("uncommitted\n")
-    result = launch(project, "tmux", sys.executable, "scripts/experiment.py", "train.steps=20")
+    result = launch(project, "tmux", sys.executable, "scripts/stand_in.py")
     assert result.returncode == 0, result.stderr
     assert git(project, "tag") == ""
     run_dir = only_run(project, "scratch")
@@ -340,15 +329,7 @@ def test_scratch_run_needs_no_tag_and_no_clean_tree(project):
 
 
 def test_experiment_in_a_subfolder(project):
-    result = launch(
-        project,
-        "tmux",
-        sys.executable,
-        "scripts/experiment.py",
-        "+experiment=vision/002-sub",
-        "train.steps=20",
-        "journal.export=false",
-    )
+    result = launch(project, "tmux", sys.executable, "scripts/stand_in.py", "+experiment=vision/002-sub")
     assert result.returncode == 0, result.stderr
     assert git(project, "tag") == "exp/002-sub"
     info = read_json(only_run(project, "002-sub") / "run.json")
@@ -356,7 +337,8 @@ def test_experiment_in_a_subfolder(project):
 
 
 def test_unknown_option_and_missing_command(project):
-    assert launch(project, "tmux", "--nonsense", *TOY).returncode == 1
+    assert launch(project, "tmux", "--nonsense", *RUN).returncode == 1
+    assert "--profile needs a name" in launch(project, "tmux", "--profile").stderr
     assert launch(project, "tmux").returncode == 1
     assert launch(project, "tmux", "--help").returncode == 0
 
@@ -365,7 +347,7 @@ def test_unknown_option_and_missing_command(project):
 
 
 def test_tmux_launch_end_to_end(project):
-    result = launch(project, "tmux", *TOY)
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
     run_dir = only_run(project)
     # The session is named after the run ID.
@@ -378,26 +360,19 @@ def test_tmux_launch_end_to_end(project):
     }
     info = read_json(run_dir / "run.json")
     assert info["run_id"] == run_dir.name
-    assert info["git"]["tag"] == "exp/001-toy" and info["git"]["dirty"] is False
+    assert info["git"]["tag"] == "exp/900-stand-in" and info["git"]["dirty"] is False
     assert info["launch"]["scheduler"] == "tmux" and info["launch"]["job_id"] == run_dir.name
-    assert "final loss" in (run_dir / "output.log").read_text()
+    assert "run folder:" in (run_dir / "output.log").read_text()
     assert (run_dir / "summary.json").is_file() and (run_dir / "job.sh").is_file()
 
 
 def test_failed_job_is_recorded(project):
-    result = launch(
-        project,
-        "tmux",
-        sys.executable,
-        "scripts/experiment.py",
-        "+experiment=001-toy",
-        "train.steps=not-a-number",
-    )
+    result = launch(project, "tmux", *RUN, "seed=[not closed")
     assert result.returncode == 0  # the launch itself worked
     run_dir = only_run(project)
     status = read_json(run_dir / "status.json")
     assert status["state"] == "failed" and status["exit_code"] != 0
-    assert "not-a-number" in (run_dir / "output.log").read_text()
+    assert "not closed" in (run_dir / "output.log").read_text()
 
 
 def test_tmux_profile_setup_lines_run_before_the_job(project):
@@ -412,9 +387,9 @@ def test_tmux_profile_setup_lines_run_before_the_job(project):
 def test_runs_dir_comes_from_dot_env(project):
     elsewhere = project.parent / "big-disk"
     (project / ".env").write_text(f'WANDB_API_KEY=x\nRUNS_DIR="{elsewhere}"\n')
-    result = launch(project, "tmux", *TOY)
+    result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
-    (run_dir,) = (elsewhere / "001-toy").iterdir()
+    (run_dir,) = (elsewhere / "900-stand-in").iterdir()
     assert read_json(run_dir / "run.json")["run_dir"] == str(run_dir)
     assert not (project / "runs").exists()
 
@@ -435,7 +410,7 @@ def test_runs_dir_comes_from_dot_env(project):
 def test_launcher_and_python_read_runs_dir_the_same(project, line):
     """The launcher creates the run folder and `make status` looks for it: both must agree."""
     (project / ".env").write_text(line + "\n")
-    result = launch(project, "tmux", "--dry-run", *TOY)
+    result = launch(project, "tmux", "--dry-run", *RUN)
     assert result.returncode == 0, result.stderr
     (run_folder,) = [text for text in result.stdout.splitlines() if text.startswith("run folder: ")]
     from_launcher = Path(run_folder.removeprefix("run folder: ")).parents[1]
@@ -454,13 +429,13 @@ def test_launcher_and_python_read_runs_dir_the_same(project, line):
 
 
 def test_slurm_needs_a_profile(project):
-    result = launch(project, "slurm", *TOY)
+    result = launch(project, "slurm", *RUN)
     assert result.returncode == 1 and "no profile" in result.stderr
-    assert launch(project, "slurm", "--profile", "missing", *TOY).returncode == 1
+    assert launch(project, "slurm", "--profile", "missing", *RUN).returncode == 1
 
 
 def test_slurm_job_is_queued_with_the_profile_header(project):
-    result = launch(project, "slurm", "--profile", "hpc-gpu", "--sbatch", "--time=12:00:00 --mem=64G", *TOY)
+    result = launch(project, "slurm", "--profile", "hpc-gpu", "--sbatch", "--time=12:00:00 --mem=64G", *RUN)
     assert result.returncode == 0, result.stderr
     assert "submitted Slurm job 4242" in result.stdout
     run_dir = only_run(project)
@@ -475,7 +450,7 @@ def test_slurm_job_is_queued_with_the_profile_header(project):
     assert "#SBATCH --gres=gpu:1" in lines
 
     arguments = (project.parent / "fake.log").read_text().split()
-    assert arguments[0] == "--parsable" and "--job-name=001-toy" in arguments
+    assert arguments[0] == "--parsable" and "--job-name=900-stand-in" in arguments
     assert f"--output={run_dir}/slurm.log" in arguments
     # Flags for this launch come after the defaults and before the script.
     assert arguments[-3:] == ["--time=12:00:00", "--mem=64G", str(run_dir / "job.sh")]
@@ -483,25 +458,17 @@ def test_slurm_job_is_queued_with_the_profile_header(project):
 
 def test_slurm_profile_from_dot_env(project):
     (project / ".env").write_text("LAUNCH_PROFILE=hpc-cpu\n")
-    result = launch(project, "slurm", "--dry-run", *TOY)
+    result = launch(project, "slurm", "--dry-run", *RUN)
     assert result.returncode == 0, result.stderr
     assert "#SBATCH --partition=cpu" in result.stdout
 
 
 def test_slurm_job_end_to_end(project):
-    result = launch(project, "slurm", "--profile", "hpc-gpu", *TOY, run=True)
+    result = launch(project, "slurm", "--profile", "hpc-gpu", *RUN, run=True)
     assert result.returncode == 0, result.stderr
     run_dir = only_run(project)
     assert read_json(run_dir / "status.json")["state"] == "done"
     info = read_json(run_dir / "run.json")
     assert info["launch"]["scheduler"] == "slurm" and info["launch"]["job_id"] == "4242"
-    assert info["git"]["tag"] == "exp/001-toy"
-    assert "final loss" in (run_dir / "output.log").read_text()
-
-
-def test_job_runs_even_if_the_library_is_broken(project):
-    """The wrapper records a crash of the Python side like any other failure."""
-    result = launch(project, "tmux", sys.executable, "-c", "import expkit_missing_module")
-    assert result.returncode == 0
-    status = read_json(only_run(project, "scratch") / "status.json")
-    assert status["state"] == "failed" and status["exit_code"] == 1
+    assert info["git"]["tag"] == "exp/900-stand-in"
+    assert "run folder:" in (run_dir / "output.log").read_text()

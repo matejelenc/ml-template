@@ -57,9 +57,9 @@ parse_arguments() {
     SBATCH_FLAGS=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --profile) PROFILE="$2"; shift 2 ;;
+            --profile) [ "$#" -ge 2 ] || fail "--profile needs a name"; PROFILE="$2"; shift 2 ;;
             --allow-dirty) ALLOW_DIRTY=1; shift ;;
-            --sbatch) SBATCH_FLAGS="$2"; shift 2 ;;
+            --sbatch) [ "$#" -ge 2 ] || fail "--sbatch needs the flags"; SBATCH_FLAGS="$2"; shift 2 ;;
             --dry-run) DRY_RUN=1; shift ;;
             -h|--help) usage; exit 0 ;;
             --) shift; break ;;

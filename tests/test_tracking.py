@@ -14,12 +14,15 @@ class FakeWandbRun:
     url = "https://wandb.ai/me/project/runs/abc"
 
     def __init__(self):
-        self.logged, self.finished, self.fail = [], False, False
+        self.logged, self.defined, self.finished, self.fail = [], {}, False, False
 
-    def log(self, metrics, step=None):
+    def log(self, metrics):
         if self.fail:
             raise RuntimeError("connection lost")
-        self.logged.append((step, metrics))
+        self.logged.append(metrics)
+
+    def define_metric(self, name, step_metric=None):
+        self.defined[name] = step_metric
 
     def finish(self):
         self.finished = True
@@ -81,8 +84,26 @@ def test_log_and_finish_reach_wandb(tmp_path, fake_wandb):
     tracking.start(cfg, run)
     run.log(step=10, loss=0.5)
     run.finish(metrics={"loss": 0.1})
-    assert fake_wandb.run.logged == [(10, {"loss": 0.5}), (None, {"final/loss": 0.1})]
+    assert fake_wandb.run.logged == [{"step": 10, "loss": 0.5}, {"final/loss": 0.1}]
+    assert fake_wandb.run.defined == {"loss": "step"}
     assert fake_wandb.run.finished
+
+
+def test_each_series_has_its_own_step_counter_in_wandb(tmp_path, fake_wandb):
+    cfg = make_cfg(tmp_path)
+    run = record.start(cfg)
+    tracking.start(cfg, run)
+    run.log(step=5, series="fold_0", loss=0.5)
+    run.log(step=0, series="fold_1", loss=0.9, acc=0.1)  # a lower step than before
+    run.log(step=1, series="fold_1", loss=0.8, acc=0.2)
+    assert fake_wandb.run.logged == [
+        {"fold_0/step": 5, "fold_0/loss": 0.5},
+        {"fold_1/step": 0, "fold_1/loss": 0.9, "fold_1/acc": 0.1},
+        {"fold_1/step": 1, "fold_1/loss": 0.8, "fold_1/acc": 0.2},
+    ]
+    assert fake_wandb.run.defined == {
+        "fold_0/loss": "fold_0/step", "fold_1/loss": "fold_1/step", "fold_1/acc": "fold_1/step",
+    }
 
 
 def test_disabled_mode_never_touches_wandb(tmp_path, fake_wandb):
@@ -121,5 +142,5 @@ def test_failure_during_training_does_not_stop_the_run(tmp_path, fake_wandb):
     run.log(step=1, loss=0.5)
     run.log(step=2, loss=0.4)
     run.finish(metrics={"loss": 0.4})
-    assert len((run.dir / "metrics.jsonl").read_text().splitlines()) == 2
+    assert len((run.monitor_dir / "main.jsonl").read_text().splitlines()) == 2
     assert (run.dir / "summary.json").is_file()

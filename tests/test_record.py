@@ -76,9 +76,9 @@ def test_run_id_from_environment(monkeypatch):
 
 def test_start_creates_the_run_folder(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
-    assert run.dir.is_dir() and run.weights_dir.is_dir() and run.artifacts_dir.is_dir()
+    assert run.dir.is_dir() and run.weights_dir.is_dir() and run.journal_dir.is_dir() and run.eval_dir.is_dir()
     assert (run.dir / "run.json").is_file()
-    assert (run.dir / "config.resolved.yaml").is_file()
+    assert (run.dir / "config.yaml").is_file()
 
 
 def test_run_json_fields(tmp_path, repo):
@@ -172,7 +172,7 @@ def test_scheduler_detection(tmp_path, repo, monkeypatch):
 
 def test_resolved_config_is_written_with_schema_version(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
-    saved = yaml.safe_load((run.dir / "config.resolved.yaml").read_text())
+    saved = yaml.safe_load((run.dir / "config.yaml").read_text())
     assert saved["schema_version"] == record.SCHEMA_VERSION
     assert saved["config"]["train"]["lr"] == 0.1
 
@@ -189,7 +189,7 @@ def test_secrets_reach_no_run_file(tmp_path, repo, monkeypatch):
         if path.is_file():
             text = path.read_text()
             assert "wandb-secret-123456" not in text, path.name
-    assert "<redacted>" in (run.dir / "config.resolved.yaml").read_text()
+    assert "<redacted>" in (run.dir / "config.yaml").read_text()
 
 
 def test_config_hash_ignores_run_identity_but_not_settings():
@@ -213,30 +213,48 @@ def test_log_appends_json_lines(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     run.log(step=1, loss=0.5)
     run.log(step=2, loss=FakeTensor(), acc=0.9)
-    lines = [json.loads(line) for line in (run.dir / "metrics.jsonl").read_text().splitlines()]
+    lines = [json.loads(line) for line in (run.monitor_dir / "main.jsonl").read_text().splitlines()]
     assert lines == [{"step": 1, "loss": 0.5}, {"step": 2, "loss": 0.25, "acc": 0.9}]
 
 
 def test_metrics_can_be_appended_without_the_library(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
-    with open(run.dir / "metrics.jsonl", "a") as file:
+    with open(run.monitor_dir / "main.jsonl", "a") as file:
         file.write(json.dumps({"step": 1, "loss": 0.5}) + "\n")
     run.log(step=2, loss=0.4)
-    assert len((run.dir / "metrics.jsonl").read_text().splitlines()) == 2
+    assert len((run.monitor_dir / "main.jsonl").read_text().splitlines()) == 2
 
 
-def test_summary_lists_weights_and_artifacts(tmp_path, repo):
+def test_each_series_gets_its_own_file(tmp_path, repo):
+    run = record.start(make_cfg(tmp_path))
+    run.log(step=0, loss=1.0)
+    run.log(step=0, series="model_a/fold_0", loss=0.9)
+    run.log(step=0, series="model_a/fold_1", loss=0.8)  # steps may start again
+    run.log(step=1, series="model_a/fold_1", loss=0.7)
+    files = sorted(str(p.relative_to(run.monitor_dir)) for p in run.monitor_dir.rglob("*.jsonl"))
+    assert files == ["main.jsonl", "model_a/fold_0.jsonl", "model_a/fold_1.jsonl"]
+    assert len((run.monitor_dir / "model_a/fold_1.jsonl").read_text().splitlines()) == 2
+
+
+@pytest.mark.parametrize("series", ["", "../outside", "/absolute", "a//b", "a/", "with space", ".hidden"])
+def test_bad_series_names_are_refused(tmp_path, repo, series):
+    run = record.start(make_cfg(tmp_path))
+    with pytest.raises(ValueError):
+        run.log(step=0, series=series, loss=1.0)
+
+
+def test_summary_lists_weights_and_journal_files(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     (run.weights_dir / "model.pt").write_bytes(b"weights" * 1000)
     (run.weights_dir / "sub").mkdir()
     (run.weights_dir / "sub" / "head.pt").write_bytes(b"head")
-    (run.artifacts_dir / "loss.pdf").write_bytes(b"%PDF")
+    (run.journal_dir / "loss.pdf").write_bytes(b"%PDF")
     run.finish(metrics={"loss": FakeTensor(), "acc": 0.9})
     summary = read_json(run.dir / "summary.json")
     assert summary["schema_version"] == record.SCHEMA_VERSION
     assert summary["metrics"] == {"loss": 0.25, "acc": 0.9}
     assert summary["duration_seconds"] >= 0
-    assert summary["artifacts"] == ["artifacts/loss.pdf"]
+    assert summary["journal"] == ["journal/loss.pdf"]
     assert summary["weights"] == [
         {"path": "weights/model.pt", "size_bytes": 7000,
          "sha256": hashlib.sha256(b"weights" * 1000).hexdigest()},

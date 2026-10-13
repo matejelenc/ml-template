@@ -46,17 +46,6 @@
 % \expwandb{https://wandb.ai/...}
 \newcommand{\expwandb}[1]{\par\noindent W\&B: \url{#1}\par}
 
-% Config changes against the base config: one \expchange{setting}{baseline}{this run} per row.
-\newenvironment{expconfig}{%
-  \par\medskip\noindent
-  \begin{tabular}{@{}lll@{}}
-    \toprule Setting & Baseline & This run \\ \midrule}{%
-    \bottomrule
-  \end{tabular}\par}
-\newcommand{\expchange}[3]{\texttt{#1} & #2 & #3 \\}
-\newcommand{\expnochanges}{\par\medskip\noindent Config: identical to the base config.\par}
-\newcommand{\expnobaseline}{\par\medskip\noindent Config: no base config was recorded for this run.\par}
-
 % Final metrics: one \expmetric{name}{value} per row.
 \newenvironment{expmetrics}{%
   \par\medskip\noindent

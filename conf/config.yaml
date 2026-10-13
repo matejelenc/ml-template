@@ -46,6 +46,6 @@ hydra:
   job:
     # Stay in the repo root, so relative paths in code keep working.
     chdir: false
-  # No .hydra/ folder in the run folder: expkit writes config.resolved.yaml instead,
+  # No .hydra/ folder in the run folder: expkit writes config.yaml instead,
   # with secrets redacted.
   output_subdir: null

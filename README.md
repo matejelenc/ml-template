@@ -87,24 +87,39 @@ A run folder is `$RUNS_DIR/<experiment>/<run id>/`:
 
 | File | Content |
 |---|---|
-| `run.json` | commit, tag, machine, command, W&B link |
+| `run.json` | written at the start: commit, tag, machine, command, W&B link |
 | `status.json` | `queued`, `running`, `done`, `failed` or `cancelled`, with a heartbeat time |
-| `config.resolved.yaml` | the final config, secrets redacted |
-| `config.base.yaml` | the base config the journal compares against |
-| `metrics.jsonl` | one JSON object per logged step |
-| `summary.json` | final metrics, weight files with size and SHA-256, artifacts |
+| `config.yaml` | the final config, secrets redacted |
+| `monitor/` | numbers logged during training, one JSON object per step; the local copy of what W&B gets. `main.jsonl`, plus one file per named series |
+| `summary.json` | written at the end: final metrics, duration, weight files with size and SHA-256, journal files |
 | `stdout.log`, `job.sh` | output and the exact job script |
-| `artifacts/` | plots and tables; every PDF or PNG here goes into the journal entry |
+| `journal/` | the figures you select for the Overleaf journal; every PDF, PNG or JPG here is exported, subfolders included |
+| `eval/` | everything else from evaluation (predictions, statistics, further plots); organized as you like, never read by the code |
 | `weights/` | model weights; they stay on the server |
+
+`run.json` and `summary.json` are separate on purpose. `run.json` says where a run came from
+and exists from the first second, so a crashed run still has it. `summary.json` says what
+the run produced and exists only when the run finished: a run folder without it did not
+finish, and the journal export skips it.
 
 In your own script, the bookkeeping is four lines (see `scripts/experiment.py`):
 
 ```python
-run = record.start(cfg)             # run.json, config files
+run = record.start(cfg)             # run.json, config.yaml
 tracking.start(cfg, run)            # W&B
-run.log(step=100, loss=0.42)        # metrics.jsonl and W&B
+run.log(step=100, loss=0.42)        # monitor/main.jsonl and W&B
 run.finish(metrics={"loss": 0.01})  # summary.json
 ```
+
+An experiment that trains several models or folds in one run names a series per model:
+
+```python
+run.log(step=100, series="model_a/fold_0", loss=0.42)   # monitor/model_a/fold_0.jsonl
+```
+
+Each series counts its own steps and appears in W&B as `model_a/fold_0/loss`.
+`run.finish(metrics=...)` is for a handful of headline numbers. Larger tables belong in
+`journal/` or `eval/` as files.
 
 ## Commands
 

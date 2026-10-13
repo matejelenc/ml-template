@@ -58,11 +58,11 @@ def test_run_folder_matches_the_schema(tmp_path):
     assert result.returncode == 0, result.stderr
     run_dir = tmp_path / "001-toy" / "test-run"
     assert sorted(path.name for path in run_dir.iterdir()) == [
-        "artifacts", "config.base.yaml", "config.resolved.yaml", "metrics.jsonl", "run.json",
+        "config.yaml", "eval", "journal", "monitor", "run.json",
         "summary.json", "weights",
     ]  # in particular: no .hydra folder and no Hydra log file
     assert (run_dir / "weights" / "model.json").is_file()
-    assert (run_dir / "artifacts" / "loss.pdf").is_file()
+    assert (run_dir / "journal" / "loss.pdf").is_file()
 
 
 def test_run_id_is_generated_without_the_launcher(tmp_path):

@@ -43,19 +43,19 @@ def train(cfg: DictConfig, run: record.Run) -> float:
 
 
 def plot_loss(run: record.Run) -> None:
-    """Save the loss curve as a PDF in artifacts/. The journal entry includes every figure there."""
+    """Save the loss curve as a PDF in journal/. The journal entry includes every figure there."""
     import matplotlib
 
     matplotlib.use("Agg")  # no display needed on a server
     import matplotlib.pyplot as plt
 
-    rows = [json.loads(line) for line in (run.dir / "metrics.jsonl").read_text().splitlines()]
+    rows = [json.loads(line) for line in (run.monitor_dir / "main.jsonl").read_text().splitlines()]
     figure, axis = plt.subplots(figsize=(5, 3))
     axis.plot([row["step"] for row in rows], [row["loss"] for row in rows])
     axis.set(xlabel="step", ylabel="loss", yscale="log")
     figure.tight_layout()
     # A fixed creation date keeps the file identical between identical runs.
-    figure.savefig(run.artifacts_dir / "loss.pdf", metadata={"CreationDate": None})
+    figure.savefig(run.journal_dir / "loss.pdf", metadata={"CreationDate": None})
     plt.close(figure)
 
 

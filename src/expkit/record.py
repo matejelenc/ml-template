@@ -3,12 +3,16 @@
 A run folder is $RUNS_DIR/<experiment_id>/<run_id>/ and contains:
 
     run.json               where the run came from (code, machine, command), written at start
-    config.resolved.yaml   the final merged config, secrets redacted
-    config.base.yaml       conf/config.yaml alone, without experiment file or command-line
-                           overrides: the baseline that journal entries compare against
-    metrics.jsonl          one JSON object per line: {"step": 100, "loss": 0.42}
-    summary.json           final metrics, weight files and artifacts, written at the end
-    artifacts/             plots and tables (small)
+    config.yaml            the final merged config, secrets redacted
+    monitor/               numbers logged during training, one JSON object per line:
+                           {"step": 100, "loss": 0.42}. Everything is in monitor/main.jsonl
+                           unless a series is named: run.log(..., series="model_a/fold_0")
+                           writes monitor/model_a/fold_0.jsonl
+    summary.json           final metrics, weight files and journal files, written at the end
+    journal/               the figures and tables that go into the Overleaf journal (small,
+                           a selection; subfolders allowed)
+    eval/                  everything else from evaluation: predictions, targets, statistics,
+                           further plots. Organize it as you like; expkit never reads it.
     weights/               model weights (stay on the server)
     wandb/                 W&B's own files, only when W&B tracking is on
 
@@ -18,6 +22,7 @@ Use it from training code like this:
 
     run = record.start(cfg)
     run.log(step=100, loss=0.42)
+    run.log(step=100, series="fold_0", loss=0.42)   # several models or folds in one run
     run.finish(metrics={"loss": 0.01})
 """
 
@@ -51,6 +56,11 @@ SCHEMA_VERSION = 1
 
 # Config keys that are not experiment settings: they can differ between two runs of the same
 # experiment. Left out of config_sha256 and of the config diff in journal entries.
+# The series that run.log writes to when none is named.
+MAIN_SERIES = "main"
+# A series is a name or a path of names: "fold_0", "model_a/fold_0".
+_SERIES_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$")
+
 NOT_SETTINGS = ("experiment_id", "run_id", "paths", "wandb", "journal")
 
 
@@ -141,19 +151,42 @@ class Run:
     def __init__(self, run_dir: Path):
         self.dir = run_dir
         self.weights_dir = run_dir / "weights"
-        self.artifacts_dir = run_dir / "artifacts"
+        self.journal_dir = run_dir / "journal"
+        self.eval_dir = run_dir / "eval"
+        self.monitor_dir = run_dir / "monitor"
         # Set by tracking.start(). While it is None, nothing is sent to W&B.
         self.wandb: Any = None
         self._started = time.monotonic()
+        # Metric names that W&B has been told the step counter of.
+        self._wandb_metrics: set = set()
 
-    def log(self, step: int, **metrics: Any) -> None:
-        """Append one line to metrics.jsonl: run.log(step=100, loss=0.42).
+    def log(self, step: int, series: str = MAIN_SERIES, **metrics: Any) -> None:
+        """Append one line of numbers to monitor/<series>.jsonl and send them to W&B.
 
-        Also sends the metrics to W&B when tracking is on.
+            run.log(step=100, loss=0.42)                      # monitor/main.jsonl
+            run.log(step=100, series="model_a/fold_0", loss=0.42)  # monitor/model_a/fold_0.jsonl
+
+        Each series counts its own steps, so a second model or fold can start again at 0.
+        In W&B a series shows up as a name prefix: "model_a/fold_0/loss".
         """
-        with open(self.dir / "metrics.jsonl", "a") as file:
+        if not _SERIES_NAME.match(series):
+            raise ValueError(f"Bad series name {series!r}: use letters, digits, - and _, with / between levels.")
+        path = self.monitor_dir / f"{series}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as file:
             file.write(json.dumps({"step": step, **metrics}, default=_plain) + "\n")
-        self._wandb("log", metrics, step=step)
+
+        if self.wandb is None:
+            return
+        prefix = "" if series == MAIN_SERIES else f"{series}/"
+        step_name = f"{prefix}step"
+        # W&B has one global step counter that may never go back. Each series therefore gets
+        # its own step, sent as an ordinary value and declared as the x-axis of its metrics.
+        for name in metrics:
+            if prefix + name not in self._wandb_metrics:
+                self._wandb_metrics.add(prefix + name)
+                self._wandb("define_metric", prefix + name, step_metric=step_name)
+        self._wandb("log", {step_name: step, **{prefix + name: value for name, value in metrics.items()}})
 
     def update(self, **fields: Any) -> None:
         """Add or change fields in run.json, e.g. run.update(wandb_url=...)."""
@@ -161,7 +194,7 @@ class Run:
         write_json(path, redact({**json.loads(path.read_text()), **fields}))
 
     def finish(self, metrics: Optional[Dict[str, Any]] = None) -> dict:
-        """Write summary.json: final metrics, every file in weights/ and artifacts/.
+        """Write summary.json: final metrics, every file in weights/ and journal/.
 
         Also closes the W&B run when tracking is on.
         """
@@ -178,7 +211,7 @@ class Run:
                 }
                 for path in _files(self.weights_dir)
             ],
-            "artifacts": [str(path.relative_to(self.dir)) for path in _files(self.artifacts_dir)],
+            "journal": [str(path.relative_to(self.dir)) for path in _files(self.journal_dir)],
         }
         write_json(self.dir / "summary.json", summary)
         self._wandb("log", {f"final/{name}": value for name, value in summary["metrics"].items()})
@@ -196,19 +229,6 @@ class Run:
             self.wandb = None
 
 
-def _base_config() -> Optional[dict]:
-    """The base config with no experiment file and no overrides, or None outside a Hydra app."""
-    try:
-        from hydra import compose
-        from hydra.core.hydra_config import HydraConfig
-
-        base = compose(config_name=HydraConfig.get().job.config_name)
-        return OmegaConf.to_container(base, resolve=True)
-    except Exception as error:  # noqa: BLE001 - the baseline is optional
-        log.warning("Could not build the base config, journal entries will show no diff: %s", error)
-        return None
-
-
 def _write_config(path: Path, config: dict) -> None:
     with open(path, "w") as file:
         yaml.safe_dump({"schema_version": SCHEMA_VERSION, "config": config}, file, sort_keys=False)
@@ -220,19 +240,18 @@ def _files(folder: Path) -> List[Path]:
 
 
 def start(cfg: DictConfig) -> Run:
-    """Create the run folder and write run.json and config.resolved.yaml.
+    """Create the run folder and write run.json and config.yaml.
 
     Uses cfg.paths.run_dir, cfg.experiment_id and cfg.run_id from the base config.
     """
     run = Run(Path(cfg.paths.run_dir).resolve())
     run.weights_dir.mkdir(parents=True, exist_ok=True)
-    run.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    run.journal_dir.mkdir(parents=True, exist_ok=True)
+    run.eval_dir.mkdir(parents=True, exist_ok=True)
+    run.monitor_dir.mkdir(parents=True, exist_ok=True)
 
     config = redact(OmegaConf.to_container(cfg, resolve=True))
-    _write_config(run.dir / "config.resolved.yaml", config)
-    base = _base_config()
-    if base is not None:
-        _write_config(run.dir / "config.base.yaml", redact(base))
+    _write_config(run.dir / "config.yaml", config)
 
     run_info = {
         "schema_version": SCHEMA_VERSION,

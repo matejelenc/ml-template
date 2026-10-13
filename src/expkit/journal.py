@@ -26,12 +26,9 @@ import subprocess
 import time
 from importlib import resources
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import yaml
+from typing import Any, List, Optional, Tuple, Union
 
 from expkit import __version__, gitutil
-from expkit.record import NOT_SETTINGS
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +38,7 @@ PathLike = Union[str, Path]
 FIGURE_TYPES = (".pdf", ".png", ".jpg", ".jpeg")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_ENTRY_BYTES = 10 * 1024 * 1024
-# Longer config values are cut in the entry. The full value stays in config.resolved.yaml.
+# Longer values are cut in the entry.
 MAX_VALUE_LENGTH = 60
 
 PUSH_ATTEMPTS = 5
@@ -64,7 +61,7 @@ def tex_escape(text: Any) -> str:
 
 
 def format_value(value: Any) -> str:
-    """A config or metric value as short, LaTeX-safe text."""
+    """A metric value as short, LaTeX-safe text."""
     if isinstance(value, float):
         text = f"{value:.4g}"
     elif isinstance(value, (dict, list)):
@@ -89,10 +86,6 @@ def format_duration(seconds: float) -> str:
 
 # --- Reading a run folder -----------------------------------------------------------
 
-def _read_config(path: Path) -> Optional[dict]:
-    return yaml.safe_load(path.read_text())["config"] if path.is_file() else None
-
-
 def find_run(experiment_id: str, run_id: Optional[str] = None,
              runs_dir: Optional[PathLike] = None) -> Path:
     """Folder of a finished run: the given run, or the newest one of the experiment."""
@@ -108,56 +101,19 @@ def find_run(experiment_id: str, run_id: Optional[str] = None,
     raise FileNotFoundError(f"No finished run (with summary.json) found in {experiment_dir}")
 
 
-# --- Config diff --------------------------------------------------------------------
-
-_ABSENT = object()
-
-
-def _flatten(config: dict, prefix: str = "") -> Dict[str, Any]:
-    """{"train": {"lr": 0.1}} becomes {"train.lr": 0.1}."""
-    flat: Dict[str, Any] = {}
-    for key, value in config.items():
-        name = f"{prefix}{key}"
-        if isinstance(value, dict) and value:
-            flat.update(_flatten(value, name + "."))
-        else:
-            flat[name] = value
-    return flat
-
-
-def config_diff(base: dict, config: dict) -> List[Tuple[str, Any, Any]]:
-    """Settings that differ from the base config, as (name, base value, run value).
-
-    A setting missing on one side has the value None there and is shown as a dash.
-    Keys that are not experiment settings (run ID, paths, W&B) are left out.
-    """
-    flat_base = _flatten({k: v for k, v in base.items() if k not in NOT_SETTINGS})
-    flat_run = _flatten({k: v for k, v in config.items() if k not in NOT_SETTINGS})
-    rows = []
-    for name in sorted(set(flat_base) | set(flat_run)):
-        before, after = flat_base.get(name, _ABSENT), flat_run.get(name, _ABSENT)
-        if before != after:
-            rows.append((name, before, after))
-    return rows
-
-
-def _diff_cell(value: Any) -> str:
-    return "---" if value is _ABSENT else format_value(value)
-
-
 # --- Rendering ------------------------------------------------------------------------
 
-def _figure_name(path: Path, artifacts_dir: Path) -> str:
+def _figure_name(path: Path, journal_dir: Path) -> str:
     """A file name that is safe in LaTeX: "plots/val loss.pdf" becomes "plots-val-loss.pdf"."""
-    stem = "-".join(path.relative_to(artifacts_dir).with_suffix("").parts)
+    stem = "-".join(path.relative_to(journal_dir).with_suffix("").parts)
     return re.sub(r"[^A-Za-z0-9-]+", "-", stem).strip("-") + path.suffix.lower()
 
 
 def _choose_figures(run_dir: Path) -> Tuple[List[Tuple[Path, str]], List[Tuple[str, str]]]:
     """Figures to copy as (source, new name), and skipped ones as (name, reason)."""
-    artifacts_dir = run_dir / "artifacts"
+    journal_dir = run_dir / "journal"
     chosen, skipped, total = [], [], 0
-    for path in sorted(artifacts_dir.rglob("*")):
+    for path in sorted(journal_dir.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in FIGURE_TYPES:
             continue
         size = path.stat().st_size
@@ -167,7 +123,7 @@ def _choose_figures(run_dir: Path) -> Tuple[List[Tuple[Path, str]], List[Tuple[s
             skipped.append((path.name, "entry size limit reached"))
         else:
             total += size
-            chosen.append((path, _figure_name(path, artifacts_dir)))
+            chosen.append((path, _figure_name(path, journal_dir)))
     return chosen, skipped
 
 
@@ -175,8 +131,6 @@ def render_entry(run_dir: Path, figures: List[str], skipped: List[Tuple[str, str
     """The text of entry.tex: facts only, each as one macro call. macros.sty does the layout."""
     info = json.loads((run_dir / "run.json").read_text())
     summary = json.loads((run_dir / "summary.json").read_text())
-    config = _read_config(run_dir / "config.resolved.yaml") or {}
-    base = _read_config(run_dir / "config.base.yaml")
     experiment_id, git = info["experiment_id"], info["git"]
 
     lines = [
@@ -195,18 +149,6 @@ def render_entry(run_dir: Path, figures: List[str], skipped: List[Tuple[str, str
         lines.append("\\expdirty")
     if info.get("wandb_url"):
         lines.append("\\expwandb{%s}" % info["wandb_url"])
-
-    if base is None:
-        lines.append("\\expnobaseline")
-    else:
-        changes = config_diff(base, config)
-        if changes:
-            lines.append("\\begin{expconfig}")
-            lines += ["\\expchange{%s}{%s}{%s}" % (tex_escape(name), _diff_cell(a), _diff_cell(b))
-                      for name, a, b in changes]
-            lines.append("\\end{expconfig}")
-        else:
-            lines.append("\\expnochanges")
 
     if summary["metrics"]:
         lines.append("\\begin{expmetrics}")

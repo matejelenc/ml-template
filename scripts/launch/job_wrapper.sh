@@ -3,6 +3,8 @@
 #
 #   job_wrapper.sh <run_dir> <command...>     run the command
 #   job_wrapper.sh --queued <run_dir>         only mark the run as queued (used by launchers)
+#   job_wrapper.sh --failed <run_dir>         only mark the run as failed: the scheduler did
+#                                             not accept it (used by launchers)
 #
 # States: queued -> running -> done | failed | cancelled.
 # While the job runs, the "heartbeat" time is refreshed every minute. A run that says
@@ -24,10 +26,10 @@ write_status() {
     mv "$temporary" "$RUN_DIR/status.json"
 }
 
-if [ "${1:-}" = "--queued" ]; then
+if [ "${1:-}" = "--queued" ] || [ "${1:-}" = "--failed" ]; then
     RUN_DIR="$2"
     mkdir -p "$RUN_DIR"
-    write_status queued null
+    write_status "${1#--}" null
     exit 0
 fi
 

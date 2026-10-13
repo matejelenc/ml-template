@@ -15,7 +15,9 @@ make_job_script tmux
 echo "submit: tmux new-session -d -s $RUN_ID bash $JOB_SCRIPT"
 [ "$DRY_RUN" = 1 ] && { echo "dry run: nothing submitted"; exit 0; }
 
-tmux new-session -d -s "$RUN_ID" "bash $(printf '%q' "$JOB_SCRIPT")"
+tmux new-session -d -s "$RUN_ID" "bash $(printf '%q' "$JOB_SCRIPT")" \
+    || submit_failed "tmux could not start the session (its message is above)"
+push_tag
 echo "started tmux session $RUN_ID"
 echo "  watch:  tmux attach -t $RUN_ID     (or: tail -f $RUN_DIR/output.log)"
 echo "  cancel: tmux kill-session -t $RUN_ID"

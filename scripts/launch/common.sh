@@ -2,7 +2,8 @@
 #
 # A launch has three steps:
 #   prepare   check the git tree, tag the experiment, create the run folder
-#   submit    hand the job script to tmux or Slurm (done in tmux.sh / slurm.sh)
+#   submit    hand the job script to tmux or Slurm (done in tmux.sh / slurm.sh), then push
+#             the tag. If the scheduler refuses the job, the launch is undone (submit_failed)
 #   wrap      job_wrapper.sh runs the command and records its state
 
 set -euo pipefail
@@ -30,13 +31,23 @@ USAGE
 }
 
 # setting NAME: the environment variable NAME, or else its line in .env, or else empty.
+# A line in .env is read as Python reads it (expkit.config.load_env): the last one wins,
+# "export" and spaces around "=" are allowed, quotes are removed, and so is a "# comment"
+# after a value without quotes.
 setting() {
-    local name="$1"
+    local name="$1" value
     if [ -n "${!name:-}" ]; then
         echo "${!name}"
-    elif [ -f "$REPO/.env" ]; then
-        { grep -m1 "^$name=" "$REPO/.env" || true; } | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//'
+        return
     fi
+    [ -f "$REPO/.env" ] || return 0
+    value="$(sed -nE "s/^[[:space:]]*(export[[:space:]]+)?${name}[[:space:]]*=[[:space:]]*//p" "$REPO/.env" | tail -n 1)"
+    case "$value" in
+        \"*\"*) value="${value#\"}"; value="${value%%\"*}" ;;
+        \'*\'*) value="${value#\'}"; value="${value%%\'*}" ;;
+        *) value="$(sed -E -e 's/[[:space:]]+#.*$//' -e 's/[[:space:]]+$//' <<<"$value")" ;;
+    esac
+    echo "$value"
 }
 
 parse_arguments() {
@@ -79,7 +90,11 @@ parse_arguments() {
 }
 
 # prepare: check the git tree and make sure the tag exp/<id> sits on the current commit.
+# The tag is pushed later, by push_tag, once the job is submitted.
 prepare() {
+    TAG=""
+    TAG_CREATED=0
+    HAS_REMOTE=0
     if [ -z "$EXPERIMENT_ID" ]; then
         echo "no +experiment=... given: scratch run, no tag"
         return
@@ -96,36 +111,53 @@ prepare() {
         fi
     fi
 
-    local tag="exp/$EXPERIMENT_ID" head has_remote=0
+    local head
+    TAG="exp/$EXPERIMENT_ID"
     head="$(git -C "$REPO" rev-parse HEAD)"
-    git -C "$REPO" remote get-url origin >/dev/null 2>&1 && has_remote=1
+    git -C "$REPO" remote get-url origin >/dev/null 2>&1 && HAS_REMOTE=1
 
-    if [ "$DRY_RUN" = 1 ]; then
-        echo "would create or reuse tag $tag on $head"
-        return
-    fi
-    # Another server may have used this experiment number already.
-    if [ "$has_remote" = 1 ]; then
+    # Another server may have used this experiment number already. A dry run changes
+    # nothing, so it does not fetch and sees only the tags that are already here.
+    if [ "$DRY_RUN" = 0 ] && [ "$HAS_REMOTE" = 1 ]; then
         git -C "$REPO" fetch --quiet --tags origin || warn "could not fetch tags from origin"
     fi
 
-    if git -C "$REPO" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    if git -C "$REPO" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
         local tagged
-        tagged="$(git -C "$REPO" rev-parse "$tag^{commit}")"
-        [ "$tagged" = "$head" ] || fail "tag $tag already exists on another commit (${tagged:0:10}).
+        tagged="$(git -C "$REPO" rev-parse "$TAG^{commit}")"
+        [ "$tagged" = "$head" ] || fail "tag $TAG already exists on another commit (${tagged:0:10}).
 One tag means one commit. Create a new experiment file with the next number instead."
-        echo "tag $tag already on this commit, reusing it"
+        echo "tag $TAG already on this commit, reusing it"
+    elif [ "$DRY_RUN" = 1 ]; then
+        echo "would create tag $TAG on $head"
     else
         # The tag message is the "# Purpose: ..." line of the experiment file.
         local purpose
         purpose="$(sed -n 's/^# *Purpose: *//p' "$experiment_file" | head -n 1)"
-        git -C "$REPO" tag -a "$tag" -m "${purpose:-Experiment $EXPERIMENT_ID}"
-        echo "created tag $tag: ${purpose:-Experiment $EXPERIMENT_ID}"
+        git -C "$REPO" tag -a "$TAG" -m "${purpose:-Experiment $EXPERIMENT_ID}"
+        TAG_CREATED=1
+        echo "created tag $TAG: ${purpose:-Experiment $EXPERIMENT_ID}"
     fi
-    if [ "$has_remote" = 1 ]; then
-        git -C "$REPO" push --quiet origin "$tag" \
-            || warn "could not push tag $tag. Push it later with: git push origin $tag"
+}
+
+# push_tag: publish the tag of the experiment. Called once the job is submitted.
+push_tag() {
+    if [ -n "$TAG" ] && [ "$HAS_REMOTE" = 1 ]; then
+        git -C "$REPO" push --quiet origin "$TAG" \
+            || warn "could not push tag $TAG. Push it later with: git push origin $TAG"
     fi
+}
+
+# submit_failed MESSAGE: the scheduler did not take the job, so nothing ran. Record that in
+# the run folder, and take back the tag if this launch made it: it was never pushed, and the
+# experiment number stays free for the corrected launch.
+submit_failed() {
+    bash "$LAUNCH_DIR/job_wrapper.sh" --failed "$RUN_DIR"
+    if [ "$TAG_CREATED" = 1 ]; then
+        git -C "$REPO" tag -d "$TAG" >/dev/null
+        echo "removed tag $TAG again: no job was submitted" >&2
+    fi
+    fail "$*"
 }
 
 # make_job_script SCHEDULER: choose the run ID and folder, write <run_dir>/job.sh.
@@ -134,7 +166,9 @@ make_job_script() {
     RUN_ID="$(date +%Y%m%d-%H%M%S)-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
     runs_dir="$(setting RUNS_DIR)"
     runs_dir="${runs_dir:-runs}"
-    # A relative RUNS_DIR is relative to the repository (same rule as expkit.config.env_path).
+    # Same rules as expkit.config.env_path: a leading ~ is the home folder, and a relative
+    # RUNS_DIR is relative to the repository.
+    case "$runs_dir" in "~") runs_dir="$HOME" ;; "~/"*) runs_dir="$HOME/${runs_dir#"~/"}" ;; esac
     case "$runs_dir" in /*) ;; *) runs_dir="$REPO/$runs_dir" ;; esac
     RUN_DIR="$runs_dir/${EXPERIMENT_ID:-scratch}/$RUN_ID"
 

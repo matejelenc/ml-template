@@ -201,7 +201,7 @@ def test_wrapper_does_not_depend_on_the_library():
 def test_dry_run_changes_nothing(project):
     result = launch(project, "tmux", "--dry-run", *TOY)
     assert result.returncode == 0, result.stderr
-    assert "would create or reuse tag exp/001-toy" in result.stdout
+    assert "would create tag exp/001-toy" in result.stdout
     assert "dry run: nothing submitted" in result.stdout
     assert git(project, "tag") == ""
     assert not (project / "runs").exists()
@@ -266,6 +266,31 @@ def test_tag_on_another_commit_is_refused(project):
     assert result.returncode == 1
     assert "already exists on another commit" in result.stderr
     assert len(list((project / "runs/001-toy").iterdir())) == 1  # nothing new was started
+    # A dry run says the same, so it can be trusted.
+    dry_run = launch(project, "tmux", "--dry-run", *TOY)
+    assert dry_run.returncode == 1 and "already exists on another commit" in dry_run.stderr
+
+
+def refuse_every_job(project, scheduler):
+    """Replace the stand-in for sbatch or tmux with one that fails, like a wrong partition."""
+    (project.parent / "bin" / scheduler).write_text("#!/usr/bin/env bash\necho 'refused' >&2\nexit 1\n")
+
+
+@pytest.mark.parametrize("launcher, scheduler", [("tmux", "tmux"), ("slurm", "sbatch")])
+def test_refused_job_leaves_no_tag_and_no_queued_run(project, launcher, scheduler):
+    refuse_every_job(project, scheduler)
+    result = launch(project, launcher, "--profile", "hpc-gpu", *TOY)
+    assert result.returncode == 1 and "refused" in result.stderr
+    # No tag here or on origin: the corrected launch may come from a new commit.
+    assert git(project, "tag") == "" and git(project.parent / "origin.git", "tag") == ""
+    assert read_json(only_run(project) / "status.json")["state"] == "failed"
+
+
+def test_refused_job_keeps_a_tag_that_was_there_before(project):
+    assert launch(project, "tmux", *TOY).returncode == 0
+    refuse_every_job(project, "tmux")
+    assert launch(project, "tmux", *TOY).returncode == 1
+    assert git(project, "tag") == "exp/001-toy"  # an earlier run used it
 
 
 def test_experiment_number_used_on_another_server_is_refused(project):
@@ -392,6 +417,37 @@ def test_runs_dir_comes_from_dot_env(project):
     (run_dir,) = (elsewhere / "001-toy").iterdir()
     assert read_json(run_dir / "run.json")["run_dir"] == str(run_dir)
     assert not (project / "runs").exists()
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "RUNS_DIR=/big/runs",
+        "RUNS_DIR='/big/my runs'",
+        "RUNS_DIR=/big/runs  # the fast disk",
+        "export RUNS_DIR=/big/runs",
+        "RUNS_DIR = /big/runs",
+        "RUNS_DIR=~/big/runs",
+        "RUNS_DIR=out/runs",
+        "RUNS_DIR=/old/runs\nRUNS_DIR=/big/runs",
+    ],
+)
+def test_launcher_and_python_read_runs_dir_the_same(project, line):
+    """The launcher creates the run folder and `make status` looks for it: both must agree."""
+    (project / ".env").write_text(line + "\n")
+    result = launch(project, "tmux", "--dry-run", *TOY)
+    assert result.returncode == 0, result.stderr
+    (run_folder,) = [text for text in result.stdout.splitlines() if text.startswith("run folder: ")]
+    from_launcher = Path(run_folder.removeprefix("run folder: ")).parents[1]
+    from_python = subprocess.run(
+        [sys.executable, "-c", "from expkit import config; config.load_env(); print(config.runs_dir())"],
+        cwd=project,
+        env={name: value for name, value in os.environ.items() if name != "RUNS_DIR"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert str(from_launcher) == from_python.stdout.strip()
 
 
 # --- Slurm ---------------------------------------------------------------------------------

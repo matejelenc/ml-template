@@ -21,7 +21,8 @@ submit=(sbatch --parsable --job-name="${EXPERIMENT_ID:-scratch}" --output="$RUN_
 echo "submit: ${submit[*]}"
 [ "$DRY_RUN" = 1 ] && { echo "dry run: nothing submitted"; exit 0; }
 
-job_id="$("${submit[@]}")"
+job_id="$("${submit[@]}")" || submit_failed "sbatch did not accept the job (its message is above)"
+push_tag
 echo "submitted Slurm job $job_id"
 echo "  watch:  tail -f $RUN_DIR/output.log     (or: squeue -j $job_id)"
 echo "  cancel: scancel $job_id"

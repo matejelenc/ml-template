@@ -20,7 +20,8 @@ def run_experiment(tmp_path, *args, run_id="test-run"):
         "RUN_ID": run_id,
     }
     return subprocess.run(
-        [sys.executable, "scripts/experiment.py", "train.steps=20", "journal.export=false", *args],
+        # Extra arguments come first: a flag such as -m must stand before all settings.
+        [sys.executable, "scripts/experiment.py", *args, "train.steps=20", "journal.export=false"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -60,6 +61,14 @@ def test_command_line_override_wins_over_experiment_file(tmp_path):
 def test_unknown_experiment_fails(tmp_path):
     result = run_experiment(tmp_path, "+experiment=999-missing")
     assert result.returncode != 0
+
+
+def test_multirun_is_refused_because_its_jobs_would_share_a_run_folder(tmp_path):
+    # Hydra's own sweep folder goes to the temp folder too, not into the repository.
+    result = run_experiment(tmp_path, "-m", "train.lr=0.1,0.01", f"hydra.sweep.dir={tmp_path / 'sweep'}")
+    assert result.returncode != 0
+    assert "multirun (-m) is not supported" in result.stdout + result.stderr
+    assert not list(tmp_path.rglob("summary.json"))
 
 
 def test_run_folder_matches_the_schema(tmp_path):

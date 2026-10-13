@@ -259,6 +259,24 @@ def test_summary_lists_weights_and_journal_files(tmp_path, repo):
     ]
 
 
+class FakeArray:
+    """Behaves like a NumPy array or a tensor with several elements: item() refuses."""
+
+    def item(self):
+        raise ValueError("can only convert an array of size 1 to a Python scalar")
+
+    def tolist(self):
+        return [0.9, 0.8]
+
+
+def test_an_array_metric_does_not_cost_the_run_its_summary(tmp_path, repo):
+    run = record.start(make_cfg(tmp_path))
+    run.monitor(step=1, per_class=FakeArray())
+    run.finish(metrics={"per_class": FakeArray(), "where": tmp_path})
+    assert json.loads((run.monitor_dir / "main.jsonl").read_text())["per_class"] == [0.9, 0.8]
+    assert read_json(run.dir / "summary.json")["metrics"] == {"per_class": [0.9, 0.8], "where": str(tmp_path)}
+
+
 def test_update_changes_run_json(tmp_path, repo):
     run = record.start(make_cfg(tmp_path))
     run.update(wandb_url="https://wandb.ai/me/project/runs/abc")

@@ -42,6 +42,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from hydra.core.hydra_config import HydraConfig
+from hydra.types import RunMode
 from omegaconf import DictConfig
 
 from expkit import gitutil
@@ -127,9 +129,16 @@ def _launch() -> dict[str, Any]:
 
 
 def _plain(value: Any) -> Any:
-    """Turn a NumPy or PyTorch number into a plain Python number for JSON."""
-    if hasattr(value, "item"):
-        return value.item()
+    """Turn a value that JSON does not know into one it does.
+
+    A NumPy or PyTorch scalar becomes a number, an array or tensor a list, anything else
+    its text. It never raises: a metric of an unexpected type must not cost a finished run
+    its summary.
+    """
+    # tolist comes first: item() raises on an array with more than one element.
+    for method in ("tolist", "item"):
+        if hasattr(value, method):
+            return getattr(value, method)()
     return str(value)
 
 
@@ -257,7 +266,16 @@ def start(cfg: DictConfig) -> Run:
 
     Returns:
         The run record. Log to it with run.monitor(...) and close it with run.finish(...).
+
+    Raises:
+        RuntimeError: In a Hydra multirun (-m), where every job would share one run folder.
     """
+    # The run ID is made once per process, so the jobs of a sweep would overwrite each other.
+    if HydraConfig.initialized() and HydraConfig.get().mode == RunMode.MULTIRUN:
+        raise RuntimeError(
+            "A Hydra multirun (-m) is not supported: all its jobs would write to the same run "
+            "folder. Start one run per setting instead, for example one launch per seed."
+        )
     run = Run(Path(cfg.paths.run_dir).resolve())
     run.weights_dir.mkdir(parents=True, exist_ok=True)
     run.journal_dir.mkdir(parents=True, exist_ok=True)

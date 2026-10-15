@@ -5,8 +5,8 @@ W&B monitoring, launchers for tmux and Slurm, and journal entries pushed to Over
 
 Every piece can be done by hand if the code breaks: the manual steps are listed below.
 
-**Status:** the tmux launcher, W&B and the Overleaf journal are tested on a real server. The
-Slurm launcher is tested only against a stand-in for `sbatch`, not yet on a real cluster.
+**Status:** the tmux and Slurm launchers, W&B and the Overleaf journal are tested on real
+servers (Slurm 25.05, W&B and the Overleaf push also from a compute node).
 Running from a git worktree of the tagged commit and dataset manifests are not built.
 
 ## Start a new project
@@ -83,6 +83,14 @@ Slurm settings live in `scripts/launch/servers/<profile>.sh`: `#SBATCH` lines, t
 commands such as `module load`. Override single flags with `--sbatch "--time=12:00:00"`.
 Set a default profile with `LAUNCH_PROFILE` in `.env`.
 
+Two things to know about Slurm:
+
+- A cluster may let a job run past its `--time` before killing it (`OverTimeLimit` in
+  `scontrol show config`, for example 15 minutes). A job killed at its time limit is shown
+  as `cancelled`; `sacct -j <job id>` says `TIMEOUT`.
+- A job cancelled with `scancel` while it is still pending never starts, so nothing records
+  it: `make status` keeps showing it as `queued`. Delete its run folder.
+
 ## Where things are
 
 ```
@@ -141,8 +149,9 @@ Each series counts its own steps and appears in W&B as `model_a/fold_0/loss`.
 There is no logging method of its own. Use `print` or Python's `logging` as you like:
 both launchers save all output of the job, tracebacks and library warnings included, in
 `output.log`. The launchers set `PYTHONUNBUFFERED=1`, so what a job prints reaches the file
-at once and is kept even when the job is cancelled. Under Slurm, `slurm.log` holds what was printed before the job started, for
-example a failed `module load`. A bare `uv run python scripts/...` keeps no log file and
+at once and is kept even when the job is cancelled. Under Slurm, `slurm.log` holds what was
+printed before the job started, for example a failed `module load`, and Slurm's own message
+when it cancels the job. A bare `uv run python scripts/...` keeps no log file and
 is meant for quick debugging.
 
 ## Commands

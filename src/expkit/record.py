@@ -90,26 +90,40 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def _gpu_names(listing: str) -> list[str]:
+    """GPU names from `nvidia-smi -L`.
+
+    On a node whose cards are split into MIG slices, a job gets a slice, not a card, yet
+    nvidia-smi still lists the whole cards. The slices the job can use are listed below
+    their card; then those are returned, e.g. "NVIDIA H100 PCIe MIG 1g.10gb".
+    """
+    cards: list[str] = []
+    slices: list[str] = []
+    for line in listing.splitlines():
+        if card := re.match(r"GPU \d+: (.+?) \(UUID", line):
+            cards.append(card.group(1))
+        elif (mig := re.match(r"\s+MIG (\S+)", line)) and cards:
+            slices.append(f"{cards[-1]} MIG {mig.group(1)}")
+    return slices or cards
+
+
 def _gpu_info() -> dict[str, Any]:
     """GPU names, driver and CUDA version from nvidia-smi. Empty values without a GPU."""
     info: dict[str, Any] = {"cuda": None, "gpu_driver": None, "gpus": []}
     try:
-        query = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
+        listing = subprocess.run(
+            ["nvidia-smi", "-L"], capture_output=True, text=True, check=True, timeout=30
         ).stdout
         header = subprocess.run(["nvidia-smi"], capture_output=True, text=True, check=True, timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return info
-    for line in query.strip().splitlines():
-        name, _, driver = line.rpartition(",")
-        info["gpus"].append(name.strip())
-        info["gpu_driver"] = driver.strip()
-    match = re.search(r"CUDA Version:\s*([\d.]+)", header)
-    info["cuda"] = match.group(1) if match else None
+    info["gpus"] = _gpu_names(listing)
+    # The first line of the table: "NVIDIA-SMI 550.54.14  Driver Version: ...  CUDA Version: 12.4",
+    # since driver 610 "NVIDIA-SMI 610.57.04  KMD Version: ...  CUDA UMD Version: 13.3".
+    driver = re.search(r"NVIDIA-SMI\s+([\d.]+)", header)
+    cuda = re.search(r"CUDA (?:UMD )?Version:\s*([\d.]+)", header)
+    info["gpu_driver"] = driver.group(1) if driver else None
+    info["cuda"] = cuda.group(1) if cuda else None
     return info
 
 

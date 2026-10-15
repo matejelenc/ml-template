@@ -142,24 +142,44 @@ def test_lockfile_hash(tmp_path, repo):
     assert info["environment"]["lockfile_sha256"] == hashlib.sha256(b"lock\n").hexdigest()
 
 
-def test_gpu_fields_from_nvidia_smi(tmp_path, repo, monkeypatch):
-    """A fake nvidia-smi on PATH stands in for a GPU server."""
+def fake_nvidia_smi(tmp_path, monkeypatch, listing, header):
+    """Put a fake nvidia-smi on PATH: `-L` prints the listing, no argument prints the header."""
     fake = tmp_path / "bin" / "nvidia-smi"
     fake.parent.mkdir()
     fake.write_text(
-        "#!/bin/sh\n"
-        'if [ -n "$1" ]; then\n'
-        '  echo "NVIDIA RTX A6000, 550.54.14"; echo "NVIDIA RTX A6000, 550.54.14"\n'
-        "else\n"
-        '  echo "| NVIDIA-SMI 550.54.14   Driver Version: 550.54.14   CUDA Version: 12.4 |"\n'
-        "fi\n"
+        f"#!/bin/sh\nif [ \"$1\" = -L ]; then\ncat <<'END'\n{listing}\nEND\nelse\necho '{header}'\nfi\n"
     )
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_gpu_fields_from_nvidia_smi(tmp_path, repo, monkeypatch):
+    fake_nvidia_smi(
+        tmp_path,
+        monkeypatch,
+        "GPU 0: NVIDIA RTX A6000 (UUID: GPU-aaaa)\nGPU 1: NVIDIA RTX A6000 (UUID: GPU-bbbb)",
+        "| NVIDIA-SMI 550.54.14   Driver Version: 550.54.14   CUDA Version: 12.4 |",
+    )
     environment = read_json(record.start(make_cfg(tmp_path)).dir / "run.json")["environment"]
     assert environment["gpus"] == ["NVIDIA RTX A6000", "NVIDIA RTX A6000"]
     assert environment["gpu_driver"] == "550.54.14"
     assert environment["cuda"] == "12.4"
+
+
+def test_a_mig_slice_is_recorded_instead_of_the_whole_cards(tmp_path, repo, monkeypatch):
+    """Output of nvidia-smi 610 in a Slurm job that got one MIG slice of a node with two cards."""
+    fake_nvidia_smi(
+        tmp_path,
+        monkeypatch,
+        "GPU 0: NVIDIA H100 PCIe (UUID: GPU-aaaa)\n"
+        "  MIG 1g.10gb     Device  0: (UUID: MIG-cccc)\n"
+        "GPU 1: NVIDIA H100 PCIe (UUID: GPU-bbbb)",
+        "| NVIDIA-SMI 610.57.04              KMD Version: 610.57.04     CUDA UMD Version: 13.3     |",
+    )
+    environment = read_json(record.start(make_cfg(tmp_path)).dir / "run.json")["environment"]
+    assert environment["gpus"] == ["NVIDIA H100 PCIe MIG 1g.10gb"]
+    assert environment["gpu_driver"] == "610.57.04"
+    assert environment["cuda"] == "13.3"
 
 
 def test_scheduler_detection(tmp_path, repo, monkeypatch):

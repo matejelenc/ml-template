@@ -5,9 +5,9 @@ W&B monitoring, launchers for tmux and Slurm, and journal entries pushed to Over
 
 Every piece can be done by hand if the code breaks: the manual steps are listed below.
 
-**Status:** the launchers are tested only against stand-ins for `sbatch` and `tmux`, not yet
-on a real server. Running from a git worktree of the tagged commit and dataset manifests
-are not built.
+**Status:** the tmux launcher, W&B and the Overleaf journal are tested on a real server. The
+Slurm launcher is tested only against a stand-in for `sbatch`, not yet on a real cluster.
+Running from a git worktree of the tagged commit and dataset manifests are not built.
 
 ## Start a new project
 
@@ -71,6 +71,10 @@ gets no tag and no journal entry. Without a launcher: `uv run python scripts/exp
 - Pushes the tag once the job is submitted. If tmux or Slurm refuses the job, nothing ran:
   the run folder is marked `failed` and a tag made by this launch is removed again, so the
   corrected launch can use the same number.
+- The job gets the environment of the shell that launched it, so
+  `CUDA_VISIBLE_DEVICES=1 scripts/launch/tmux.sh ...` runs on GPU 1. For this, each tmux job
+  has a tmux server of its own: it does not appear in `tmux ls`. Use the commands the
+  launcher prints, `tmux -L <run id> attach` and `tmux -L <run id> kill-session`.
 
 One run is one setting. Hydra's multirun (`-m`) is refused, because all its jobs would write
 to the same run folder: launch once per seed or value instead.
@@ -136,7 +140,8 @@ Each series counts its own steps and appears in W&B as `model_a/fold_0/loss`.
 
 There is no logging method of its own. Use `print` or Python's `logging` as you like:
 both launchers save all output of the job, tracebacks and library warnings included, in
-`output.log`. Under Slurm, `slurm.log` holds what was printed before the job started, for
+`output.log`. The launchers set `PYTHONUNBUFFERED=1`, so what a job prints reaches the file
+at once and is kept even when the job is cancelled. Under Slurm, `slurm.log` holds what was printed before the job started, for
 example a failed `module load`. A bare `uv run python scripts/...` keeps no log file and
 is meant for quick debugging.
 

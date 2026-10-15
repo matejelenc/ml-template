@@ -180,6 +180,9 @@ make_job_script() {
             echo "# --- end of server settings ---"
         fi
         printf 'cd %q\n' "$REPO"
+        # Python holds printed text in a buffer when it goes to a file. Without this, a job
+        # that is cancelled or hits a time limit loses the last things it printed.
+        echo 'export PYTHONUNBUFFERED=1'
         # The run ID and folder are fixed here, so the launcher and the job agree on them.
         printf 'export RUN_ID=%q RUNS_DIR=%q LAUNCH_SCHEDULER=%q ALLOW_DIRTY=%q\n' \
             "$RUN_ID" "$runs_dir" "$scheduler" "$ALLOW_DIRTY"

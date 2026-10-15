@@ -6,9 +6,11 @@ Each test works in a throwaway copy of the repository with a local bare reposito
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,8 +33,9 @@ exit 0
 """
 
 FAKE_TMUX = """#!/usr/bin/env bash
-# Stand-in for tmux: "new-session -d -s NAME COMMAND" runs COMMAND at once.
+# Stand-in for tmux: "-L SERVER new-session -d -s NAME COMMAND" runs COMMAND at once.
 echo "$@" > "$FAKE_LOG"
+[ "$1" = -L ] && shift 2
 [ "$1" = new-session ] && bash -c "$5" > /dev/null 2>&1
 exit 0
 """
@@ -204,7 +207,7 @@ def test_the_exact_command_is_printed_before_submitting(project):
     assert "job_wrapper.sh" in result.stdout
     # A command that starts with a .py file is run with uv.
     assert "uv run python scripts/stand_in.py +experiment=900-stand-in seed=3" in result.stdout
-    assert "submit: tmux new-session" in result.stdout
+    assert "submit: tmux -L " in result.stdout
 
 
 def test_dirty_tree_is_refused(project):
@@ -350,8 +353,12 @@ def test_tmux_launch_end_to_end(project):
     result = launch(project, "tmux", *RUN)
     assert result.returncode == 0, result.stderr
     run_dir = only_run(project)
-    # The session is named after the run ID.
-    assert (project.parent / "fake.log").read_text().startswith(f"new-session -d -s {run_dir.name} ")
+    # The tmux server and its session are named after the run ID.
+    assert (
+        (project.parent / "fake.log")
+        .read_text()
+        .startswith(f"-L {run_dir.name} new-session -d -s {run_dir.name} ")
+    )
     assert read_json(run_dir / "status.json") == {
         "schema_version": 1,
         "state": "done",
@@ -382,6 +389,66 @@ def test_tmux_profile_setup_lines_run_before_the_job(project):
     result = launch(project, "tmux", "--profile", "mine", "bash", "-c", "echo value=$FROM_PROFILE")
     assert result.returncode == 0, result.stderr
     assert (only_run(project, "scratch") / "output.log").read_text() == "value=hello\n"
+
+
+def wait_for(condition, what, seconds=20):
+    deadline = time.time() + seconds
+    while not condition():
+        assert time.time() < deadline, what
+        time.sleep(0.1)
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed")
+def test_tmux_job_gets_the_environment_of_the_launching_shell(project):
+    """With real tmux: a tmux server that already runs must not swallow CUDA_VISIBLE_DEVICES.
+
+    A new session gets the environment of its tmux server, which was started earlier from
+    another shell. The launcher must hand the job the environment it was called with.
+    """
+    (project.parent / "bin" / "tmux").unlink()  # use the real tmux
+    # A private folder for the tmux sockets, short enough for a socket path.
+    sockets = Path(tempfile.mkdtemp(prefix="tmux", dir="/tmp"))
+    tmux_env = {name: value for name, value in os.environ.items() if name not in ("TMUX", "PROBE_VAR")}
+    tmux_env["TMUX_TMPDIR"] = str(sockets)
+    try:
+        # The user's own tmux, started before the variable was set.
+        subprocess.run(["tmux", "new-session", "-d", "-s", "already-running"], env=tmux_env, check=True)
+        result = launch(
+            project,
+            "tmux",
+            "bash",
+            "-c",
+            'echo "probe=$PROBE_VAR gpu=$CUDA_VISIBLE_DEVICES"',
+            env={"TMUX_TMPDIR": str(sockets), "PROBE_VAR": "hello", "CUDA_VISIBLE_DEVICES": "1"},
+        )
+        assert result.returncode == 0, result.stderr
+        status = only_run(project, "scratch") / "status.json"
+        wait_for(lambda: status.is_file() and read_json(status)["state"] == "done", "the job did not finish")
+        assert (only_run(project, "scratch") / "output.log").read_text() == "probe=hello gpu=1\n"
+    finally:
+        subprocess.run(["tmux", "kill-server"], env=tmux_env, capture_output=True)
+        shutil.rmtree(sockets, ignore_errors=True)
+
+
+def test_output_printed_before_a_cancel_is_kept(project):
+    """Python buffers what it prints to a file; a time limit or scancel must not lose it."""
+    (project / "scripts/launch/servers/empty.sh").write_text("")
+    job = [sys.executable, "-c", "import time; print('started'); time.sleep(60)"]
+    assert launch(project, "slurm", "--profile", "empty", *job).returncode == 0
+    run_dir = only_run(project, "scratch")
+    # Run the job script as Slurm would, from an environment without the setting.
+    environment = {name: value for name, value in os.environ.items() if name != "PYTHONUNBUFFERED"}
+    process = subprocess.Popen(["bash", str(run_dir / "job.sh")], env=environment)
+    try:
+        log = run_dir / "output.log"
+        wait_for(
+            lambda: log.is_file() and "started" in log.read_text(), "the output is held back until the end"
+        )
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    assert read_json(run_dir / "status.json")["state"] == "cancelled"
+    assert "started" in (run_dir / "output.log").read_text()
 
 
 def test_runs_dir_comes_from_dot_env(project):
